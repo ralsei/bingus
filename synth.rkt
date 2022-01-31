@@ -7,8 +7,6 @@
  "unparse.rkt"
  "util.rkt")
 
-(struct fail () #:transparent)
-
 ;; compile-time environment is a hash table of terms to types
 
 ;; try each of the following functions
@@ -33,7 +31,13 @@
     (equal? (eval/bsl prog actual)
             (eval/bsl prog expected))))
 
-(define (synth ty checks [env (hash)])
+(define (synth-and-check ty checks [env (hash)])
+  (define res (synth ty checks env))
+  (and (not (fail? res))
+       (satisfies? (list (unparse res)) checks)
+       res))
+
+(define (synth ty checks env)
   (match ty
     [(function$ ins out) (introduce-lambda ins out checks env)]
     [_ (eguess ty checks env)]))

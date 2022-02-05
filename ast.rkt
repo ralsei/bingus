@@ -1,17 +1,25 @@
 #lang racket
+(require zippers
+
+         "util.rkt")
 (provide
  ;;;; SIGNATURES
- (struct-out number-atom$)
- (struct-out string-atom$)
- (struct-out singleton-atom$)
- (struct-out function$)
- (struct-out product$)
- (struct-out product-field$)
- (struct-out sum$)
- (struct-out sum-case$)
- (struct-out alias$)
+ (structs-out number-atom$
+              string-atom$
+              singleton-atom$
+              function$
+              product$
+              product-field$
+              sum$
+              sum-case$
+              alias$
+              no-goal$)
  ;;;; SYNTAX
- (struct-out lambda^)
+ (structs-out lambda^
+              hole^)
+ (struct-zipper-out lambda^
+                    hole^)
+ ;;;; CHECKS
  (struct-out check^))
 
 ;;;; SIGNATURES
@@ -68,10 +76,19 @@
 ;; (alias$ "Time" (number-atom$))
 (struct alias$ (name type) #:transparent)
 
+;; no goal (for zippers)
+(struct no-goal$ () #:transparent)
+
 ;;;; SYNTAX
 ;; (lambda (x y) x)
 ;; => (lambda^ (list 'x 'y) 'x)
 (struct lambda^ (formals body) #:transparent)
+
+;; holes
+(struct hole^ () #:transparent)
+
+;; zipper frames
+(define-struct-zipper-frames lambda^ hole^)
 
 ;;;; CHECKS
 ;; (check-expect (add1 5) 6)

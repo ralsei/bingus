@@ -5,6 +5,8 @@
 
  "ast.rkt"
  "bsl-require.rkt"
+ "init-environment.rkt"
+ "queue.rkt"
  "unparse.rkt"
  "util.rkt")
 
@@ -12,8 +14,9 @@
 ;; a partial program is:
 ;; - a zipped expression (possibly with a hole)
 ;; - a compile-time environment (a hash table of terms to types, no values)
-;; - a hole type
+;; - a list of hole types
 ;; -- this can change, since the hole changes
+;; -- if there are multiple holes, we fill the leftmost hole, then move right
 ;; a complete program is a partial program with no holes
 (struct partial-program (expr cenv type) #:transparent)
 
@@ -46,7 +49,7 @@
 (define refine/introduce-lambda
   (let ()
     (define (introduce-lambda partial-prog)
-      (match-define (partial-program zipped-expr cenv (function$ ins out))
+      (match-define (partial-program zipped-expr cenv (cons (function$ ins out) tys))
         partial-prog)
 
       (define args (map (thunk* (gensym)) ins))
@@ -60,11 +63,11 @@
         (edit (const (lambda^ args (hole^)))
               zipped-expr))
        new-cenv
-       out))
+       (cons out tys)))
 
     (define (can-introduce-lambda? partial-prog)
       (match partial-prog
-        [(partial-program (zipper expr _) _ (function$ _ _))
+        [(partial-program (zipper expr _) _ (cons (function$ _ _) _))
          (hole^? expr)]
         [_ #f]))
 
@@ -72,36 +75,49 @@
 
 (define (refine/guess-var v)
   (define (guess-var partial-prog)
-    (match-define (partial-program zipped-expr cenv _)
+    (match-define (partial-program zipped-expr cenv tys)
       partial-prog)
     (partial-program (edit (const v) zipped-expr)
                      cenv
-                     (no-goal$)))
+                     (rest tys)))
 
   (define (can-guess-var? partial-prog)
-    (match-define (partial-program (zipper focus _) cenv ty) partial-prog)
+    (match-define (partial-program (zipper focus _) cenv tys) partial-prog)
     (and (hole^? focus)
-         (equal? (hash-ref cenv v #f) ty)))
+         (not (empty? tys))
+         (equal? (hash-ref cenv v #f) (first tys))))
 
   (program-refinement guess-var can-guess-var?))
 
 (define (refine/guess-const c)
   (define (guess-const partial-prog)
-    (match-define (partial-program zipped-expr cenv _)
+    (match-define (partial-program zipped-expr cenv tys)
       partial-prog)
     (partial-program (edit (const c) zipped-expr)
                      cenv
-                     (no-goal$)))
+                     (rest tys)))
 
   (define (can-guess-const? partial-prog)
-    (match-define (partial-program (zipper focus _) _ ty) partial-prog)
+    (match-define (partial-program (zipper focus _) _ tys) partial-prog)
     (and (hole^? focus)
-         (match ty
+         (not (empty? tys))
+         (match (first tys)
            [(number-atom$) (number? c)]
            [(string-atom$) (string? c)]
            [_ #f])))
 
   (program-refinement guess-const can-guess-const?))
+
+(define (refine/guess-app fn)
+  (define (guess-app partial-prog)
+    (match-define (partial-program zipped-expr cenv (function$ ins out))
+      partial-prog)
+    (TODO))
+
+  (define (can-guess-app? partial-prog)
+    (TODO))
+
+  (program-refinement guess-app can-guess-app?))
 
 (define (extract-constants checks)
   ;; for now, just take the examples
@@ -127,19 +143,29 @@
              #:when (can-refine? movement partial-prog))
     movement))
 
-(define (run-synth init-ty checks)
-  (define (do-dfs partial-prog)
-    (match-define (partial-program zipped-expr _ ty) partial-prog)
-    (define adj (possible-refinements partial-prog checks))
-    (cond [(no-goal$? ty)
-           (define expr (rebuild zipped-expr))
-           (and (satisfies? (list (unparse expr)) checks)
-                expr)]
-          [(empty? adj) #f]
-          [else
-           (for*/first ([movement (in-list adj)]
-                        [result (in-value (do-dfs (movement partial-prog)))]
-                        #:when result)
-             result)]))
+(require racket/trace)
 
-  (do-dfs (partial-program (zip (hole^)) (hash) init-ty)))
+(define (run-synth init-ty checks)
+  (define (do-bfs q)
+    (cond [(queue-empty? q) #f]
+          [else
+           (define-values (prog others) (dequeue q))
+
+           (match-define (partial-program zipped-expr _ tys) prog)
+           (define adj (possible-refinements prog checks))
+           (cond [(empty? tys)
+                  (define expr (rebuild zipped-expr))
+                  (cond [(satisfies? (list (unparse expr)) checks) expr]
+                        [else (do-bfs others)])]
+                 [(empty? adj) (do-bfs others)]
+                 [else
+                  (define next-layer
+                    (for/fold ([new-queue others])
+                              ([movement (in-list adj)])
+                      (enqueue (movement prog) new-queue)))
+                  (do-bfs next-layer)])]))
+
+  (do-bfs
+   (enqueue
+    (partial-program (zip (hole^)) init-bsl-environment (list init-ty))
+    empty-queue)))

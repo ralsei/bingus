@@ -59,9 +59,7 @@
                       (values arg ty))
                     cenv))
       (partial-program
-       (down/lambda^-body
-        (edit (const (lambda^ args (hole^)))
-              zipped-expr))
+       (first-hole/ast (plug/ast (lambda^ args (hole^)) zipped-expr))
        new-cenv
        (cons out tys)))
 
@@ -77,9 +75,13 @@
   (define (guess-var partial-prog)
     (match-define (partial-program zipped-expr cenv tys)
       partial-prog)
-    (partial-program (edit (const v) zipped-expr)
-                     cenv
-                     (rest tys)))
+    (define new-tys (rest tys))
+    (partial-program
+     ((cond [(empty? new-tys) identity]
+            [else next-hole/ast])
+      (plug/ast v zipped-expr))
+     cenv
+     new-tys))
 
   (define (can-guess-var? partial-prog)
     (match-define (partial-program (zipper focus _) cenv tys) partial-prog)
@@ -93,9 +95,13 @@
   (define (guess-const partial-prog)
     (match-define (partial-program zipped-expr cenv tys)
       partial-prog)
-    (partial-program (edit (const c) zipped-expr)
-                     cenv
-                     (rest tys)))
+    (define new-tys (rest tys))
+    (partial-program
+     ((cond [(empty? new-tys) identity]
+            [else next-hole/ast])
+      (plug/ast c zipped-expr))
+     cenv
+     new-tys))
 
   (define (can-guess-const? partial-prog)
     (match-define (partial-program (zipper focus _) _ tys) partial-prog)
@@ -104,25 +110,53 @@
          (match (first tys)
            [(number-atom$) (number? c)]
            [(string-atom$) (string? c)]
+           [(boolean-atom$) (boolean? c)]
            [_ #f])))
 
   (program-refinement guess-const can-guess-const?))
 
 (define (refine/guess-app fn)
   (define (guess-app partial-prog)
-    (match-define (partial-program zipped-expr cenv (function$ ins out))
+    (match-define (partial-program zipped-expr cenv (cons ty tys))
       partial-prog)
-    (TODO))
+    (match-define (function$ ins _) (hash-ref cenv fn))
+    (partial-program
+     (first-hole/ast
+      (plug/ast (app^ fn (map (const (hole^)) ins)) zipped-expr))
+     cenv
+     (append ins tys)))
 
   (define (can-guess-app? partial-prog)
-    (TODO))
+    (match-define (partial-program (zipper focus _) cenv tys) partial-prog)
+    (and (hole^? focus)
+         (not (empty? tys))
+         (let ([ty (hash-ref cenv fn #f)])
+           (and (function$? ty)
+                (equal? (function$-output ty) (first tys))))))
 
   (program-refinement guess-app can-guess-app?))
 
 (define (extract-constants checks)
-  ;; for now, just take the examples
-  (for/list ([check (in-list checks)])
-    (check^-expected check)))
+  (define (extract-from-quoted exp)
+    (match exp
+      ['() '()]
+      [(cons x ys)
+       #:when (or (number? x)
+                  (string? x)
+                  (boolean? x))
+       (cons x (extract-from-quoted ys))]
+      [(cons xs ys)
+       #:when (list? xs)
+       (append (extract-from-quoted xs)
+               (extract-from-quoted ys))]
+      [(cons _ ys) (extract-from-quoted ys)]
+      [_ (list exp)]))
+
+  (for/fold ([consts '()])
+            ([check (in-list checks)])
+    (append (extract-from-quoted (check^-actual check))
+            (extract-from-quoted (check^-expected check))
+            consts)))
 
 ;; these are traversed in order.
 ;; if we want to avoid going down an infinite rabbit hole,
@@ -134,16 +168,18 @@
 
   (define possible
     (append (list refine/introduce-lambda)
-            (for/list ([(var _) (in-hash cenv)])
+            (for/list ([(var ty) (in-hash cenv)]
+                       #:when (not (function$? ty)))
               (refine/guess-var var))
             (for/list ([atom (in-list (extract-constants checks))])
-              (refine/guess-const atom))))
+              (refine/guess-const atom))
+            (for/list ([(var ty) (in-hash cenv)]
+                       #:when (function$? ty))
+              (refine/guess-app var))))
 
   (for/list ([movement (in-list possible)]
              #:when (can-refine? movement partial-prog))
     movement))
-
-(require racket/trace)
 
 (define (run-synth init-ty checks)
   (define (do-bfs q)

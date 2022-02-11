@@ -7,7 +7,8 @@
   (match exp
     [y #:when (or (symbol? y)
                   (number? y)
-                  (string? y))
+                  (string? y)
+                  (boolean? y))
        y]
     [(lambda^ formals body)
      `(define (func ,@formals) ,(unparse body))]

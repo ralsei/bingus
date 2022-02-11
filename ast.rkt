@@ -25,6 +25,10 @@
                     cond^
                     cond-case^
                     hole^)
+ ;;;; SYNTAX HELPERS
+ plug/ast
+ first-hole/ast
+ next-hole/ast
  ;;;; CHECKS
  (struct-out check^))
 

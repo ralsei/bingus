@@ -18,6 +18,7 @@
      `(cond ,@(map unparse clauses))]
     [(cond-case^ question answer)
      `(,(unparse question) ,(unparse answer))]
+    [(hole^) 'HOLE]
     [_ (error 'unparse "unsupported form: ~a" exp)]))
 
 (module+ test

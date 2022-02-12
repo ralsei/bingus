@@ -4,7 +4,8 @@
          "util.rkt")
 (provide
  ;;;; SIGNATURES
- (structs-out number-atom$
+ (structs-out anything$
+              number-atom$
               string-atom$
               boolean-atom$
               singleton-atom$
@@ -36,6 +37,9 @@
 ;; NOTE:
 ;; - we probably want a better way to think about recursion in the AST
 ;;   (but recursion comes later)
+
+;; anything
+(struct anything$ () #:transparent)
 
 ;; atomic datatypes
 ;; one of: Number, String, Boolean
@@ -136,10 +140,10 @@
 ;; goes to the next ancestor
 (define (next-ancestor/ast exp)
   (match-define (zipper focus (cons first-ctx _)) exp)
-  (cond [(zipper-at-top? exp)
-         exp
-         #;(error 'next-ancestor/ast "at top of expression: ~a" exp)]
-        [(list-item-frame? first-ctx) (right/list exp)]
+  (cond [(zipper-at-top? exp) exp]
+        [(list-item-frame? first-ctx)
+         (cond [(empty? (list-item-frame-to-right first-ctx)) (up exp)]
+               [else (right/list exp)])]
         [else (next-ancestor/ast (up exp))]))
 
 (define (next/ast exp)

@@ -11,8 +11,13 @@
 (define base-eval
   (make-evaluator 'racket/base))
 
+(define (run-eval quoted)
+  (call-in-sandbox-context
+   base-eval
+   (thunk (eval quoted))))
+
 (define (satisfies? prog checks)
-  (base-eval prog)
+  (run-eval prog)
   (for/and ([check (in-list checks)])
     (match-define (check^ actual expected) check)
-    (equal? (base-eval actual) (base-eval expected))))
+    (equal? (run-eval actual) (run-eval expected))))

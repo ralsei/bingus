@@ -4,9 +4,10 @@
  zippers
 
  "ast.rkt"
- "bsl-require.rkt"
  "init-environment.rkt"
  "queue.rkt"
+ "satisfies.rkt"
+ "template.rkt"
  "unparse.rkt"
  "util.rkt")
 
@@ -34,12 +35,6 @@
 
 (define (can-refine? refinement partial-prog)
   ((program-refinement-possible? refinement) partial-prog))
-
-(define (satisfies? prog checks)
-  (for/and ([check (in-list checks)])
-    (match-define (check^ actual expected) check)
-    (equal? (eval/bsl prog actual)
-            (eval/bsl prog expected))))
 
 ;; if we have a function type, introduce binders
 ;; function$ → lambda^
@@ -136,6 +131,33 @@
 
   (program-refinement guess-app can-guess-app?))
 
+#;(define (refine/guess-template rsystem name)
+  ;; TODO: this doesn't work for products yet.
+
+  (define (guess-template partial-prog)
+    (match-define (partial-program (zipper focus _) _ tys) partial-prog)
+    (define data-decl (hash-ref rsystem name))
+    (define n-holes
+      (cond [(sum$? data-decl) (length (sum$-cases data-decl))]
+            [(product$? data-decl) (error 'guess-template "products not supported yet")]))
+    (partial-program
+     (first-hole/ast
+      (plug/ast (generate-template name rsystem)))
+    (TODO))
+
+  (define (can-guess-template? partial-prog)
+    (match-define (partial-program (zipper focus ctx) _ tys) partial-prog)
+    (define data-decl (hash-ref rsystem name #f))
+    (and (hole^? focus)
+         (not (empty? ctx)) ; avoid introducing templates being the first thing
+         (not (empty? tys))
+         ;; only introduce templates if introducing templates makes sense
+         ;; (also note that this fails if it's not in the rsystem)
+         (or (product$? data-decl)
+             (sum$? data-decl))))
+
+  (program-refinement guess-template can-guess-template?))
+
 (define (extract-constants checks)
   (define (extract-from-quoted exp)
     (match exp
@@ -158,12 +180,8 @@
             (extract-from-quoted (check^-expected check))
             consts)))
 
-;; these are traversed in order.
-;; if we want to avoid going down an infinite rabbit hole,
-;; we should introduce constants here
-;;
-;; that, or search the tree in BFS, not DFS
-(define (possible-refinements partial-prog checks)
+;; XXX: there should be some kind of weighting here
+(define (possible-refinements partial-prog rsystem checks)
   (match-define (partial-program _ cenv _) partial-prog)
 
   (define possible
@@ -181,17 +199,19 @@
              #:when (can-refine? movement partial-prog))
     movement))
 
-(define (run-synth init-ty checks)
+(define (run-synth init-ty system checks)
+  (define rsystem (resolve-system system))
+
   (define (do-bfs q)
     (cond [(queue-empty? q) #f]
           [else
            (define-values (prog others) (dequeue q))
 
            (match-define (partial-program zipped-expr _ tys) prog)
-           (define adj (possible-refinements prog checks))
+           (define adj (possible-refinements prog rsystem checks))
            (cond [(empty? tys)
                   (define expr (rebuild zipped-expr))
-                  (cond [(satisfies? (list (unparse expr)) checks) expr]
+                  (cond [(satisfies? (unparse expr) checks) expr]
                         [else (do-bfs others)])]
                  [(empty? adj) (do-bfs others)]
                  [else

@@ -41,6 +41,7 @@
 (define (generate-sum-template name rsystem var-name)
   (define (generate-cond-question ty)
     (match ty
+      ;; if it's a constant, check it
       [(singleton-atom$ val)
        (cond [(string? val) (app^ 'string=? (list var-name val))]
              [(number? val) (app^ '= (list var-name val))]
@@ -50,6 +51,15 @@
              [else (error 'generate-sum-template
                           "invalid singleton value: ~a of signature ~a"
                           val ty)])]
+      ;; it's probably a product, try looking it up
+      [(? string? val)
+       (define maybe-product (hash-ref rsystem val))
+       (cond [(product$? maybe-product)
+              (define predicate
+                (string->symbol
+                 (string-append (pascal->kebab (product$-name maybe-product)) "?")))
+              (app^ predicate (list var-name))]
+             [else (error 'generate-sum-template "not a struct: ~a" ty)])]
       [_ (error 'generate-sum-template "currently unsupported: ~a" ty)]))
 
   (match-define (sum$ _ cases) (hash-ref rsystem name))
@@ -81,7 +91,24 @@
    (cond^
     (list (cond-case^ (app^ 'string=? '(s "finder")) (hole^ #t))
           (cond-case^ (app^ 'string=? '(s "gadabout")) (hole^ #t))
-          (cond-case^ (app^ 'string=? '(s "hunter")) (hole^ #t))))))
+          (cond-case^ (app^ 'string=? '(s "hunter")) (hole^ #t)))))
+
+  (define bon-system
+    (list
+     (product$ "None" '())
+     (product$ "Some"
+               (list (product-field$ "first" (number-atom$))
+                     (product-field$ "rest" "BunchOfNumbers")))
+     (sum$ "BunchOfNumbers"
+           (list (sum-case$ "None")
+                 (sum-case$ "Some")))))
+
+  (check-equal?
+   (generate-sum-template "BunchOfNumbers" (resolve-system bon-system) 'bon)
+   (cond^
+    (list
+     (cond-case^ (app^ 'none? '(bon)) (hole^ #t))
+     (cond-case^ (app^ 'some? '(bon)) (hole^ #t))))))
 
 ;; turns a system into an environment, by putting product accessors in scope
 (define (system->environment system)
@@ -91,13 +118,13 @@
     (match-define (product$ struct-name fields) ty)
     (define kebab-name (pascal->kebab struct-name))
 
-    (apply
+    (
      hash-set* env
      (string->symbol (string-append "make-" kebab-name))
      (function$ (map product-field$-type fields) struct-name)
      (string->symbol (string-append kebab-name "?"))
      (function$ (list (anything$)) (boolean-atom$))
-     (for/fold ([xs '()])
+     #;(for/fold ([xs '()])
                ([fld fields])
        (match-define (product-field$ field-name type) fld)
        (define accessor

@@ -244,8 +244,57 @@
 
   (do-bfs
    (enqueue
-    (partial-program (zip (hole^ #f)) init-bsl-environment (list init-ty))
+    (partial-program (zip (hole^ #f))
+                     ; add the function itself, for recursion
+                     ; TODO: we should only recur structurally, probably
+                     (hash-union
+                      init-bsl-environment
+                      (system->environment system))
+                     (list init-ty))
     empty-queue)))
+
+;;; various tests
+(define emp-system
+  (list
+   (product$ "Point"
+             (list (product-field$ "x" (number-atom$))
+                   (product-field$ "y" (number-atom$))))
+
+   (product$ "None" '())
+   (product$ "One"
+             (list (product-field$ "first" "Point")))
+   (product$ "Two"
+             (list (product-field$ "first" "Point")
+                   (product-field$ "second" "Point")))
+
+   (sum$ "EvenMorePoints"
+         (list (sum-case$ "None")
+               (sum-case$ "One")
+               (sum-case$ "Two")))))
+
+#;(pretty-print
+ (unparse
+  (run-synth
+   (function$ (list "Point" "EvenMorePoints") "EvenMorePoints")
+   emp-system
+   (list
+    (check^ '(func (make-point 3 2) (make-none)) '(make-one (make-point 3 2)))
+    (check^ '(func (make-point 3 2) (make-one (make-point 4 5)))
+            '(make-two (make-point 4 5) (make-point 3 2)))
+    (check^ '(func (make-point 9 2) (make-two (make-point 9 3) (make-point 4 2)))
+            '(make-three (make-point 9 2) (make-point 9 3) (make-point 4 2)))
+    (check^ '(func (make-point 0 0) (make-three (make-point 9 2) (make-point 9 3) (make-point 4 2)))
+            '(make-three (make-point 0 0) (make-point 9 2) (make-point 9 3)))))))
+
+(define bon-system
+  (list
+   (product$ "None" '())
+   (product$ "Some"
+             (list (product-field$ "first" (number-atom$))
+                   (product-field$ "rest" "BunchOfNumbers")))
+   (sum$ "BunchOfNumbers"
+         (list (sum-case$ "None")
+               (sum-case$ "Some")))))
 
 (define tl-system
   (list
@@ -253,7 +302,7 @@
          (list (sum-case$ (singleton-atom$ "red"))
                (sum-case$ (singleton-atom$ "yellow"))
                (sum-case$ (singleton-atom$ "green"))))))
-(pretty-print
+#;(pretty-print
  (unparse
   (run-synth
    ; TrafficLight -> String
@@ -265,7 +314,7 @@
     (check^ '(func "green") "go ahead")))))
 
 ;; this absolutely definitely does NOT work lmao
-#;(define indiana-system
+(define indiana-system
   (list
    (product$ "Address"
              (list (product-field$ "street" (string-atom$))

@@ -2,7 +2,8 @@
 (require "ast.rkt"
          "util.rkt")
 (provide resolve-system
-         generate-template
+         generate-sum-template
+         generate-product-environment
          system->environment)
 
 ;; a system is a list of products, sums, and aliases
@@ -29,23 +30,13 @@
     (values (type-name ty)
             (resolve-alias (type-name ty)))))
 
-(define (generate-template name rsystem var-name)
-  (define decl (hash-ref rsystem name))
-  (cond [(product$? decl) (generate-product-template name rsystem var-name)]
-        [(sum$? decl) (generate-sum-template name rsystem var-name)]
-        [else var-name]))
-
-(define (generate-product-template name rsystem var-name)
+(define (generate-product-environment name rsystem var-name)
   (match-define (product$ (app pascal->kebab struct-name) fields) (hash-ref rsystem name))
-
-  (app^ (hole^)
-        (for/list ([fld (in-list fields)])
-          (match-define (product-field$ accessor-name ty) fld)
-          (define accessor (string->symbol (string-append struct-name "-" accessor-name)))
-          (cond [(string? ty)
-                 (generate-template ty rsystem
-                                    (app^ accessor (list var-name)))]
-                [else (app^ accessor (list var-name))]))))
+  (for/hash ([fld (in-list fields)])
+    (match-define (product-field$ accessor-name ty) fld)
+    (define accessor
+      (string->symbol (string-append struct-name "-" accessor-name)))
+    (values (app^ accessor (list var-name)) ty)))
 
 (define (generate-sum-template name rsystem var-name)
   (define (generate-cond-question ty)
@@ -64,7 +55,7 @@
   (match-define (sum$ _ cases) (hash-ref rsystem name))
   (cond^
    (map (λ (x)
-          (cond-case^ (generate-cond-question (sum-case$-type x)) (hole^)))
+          (cond-case^ (generate-cond-question (sum-case$-type x)) (hole^ #t)))
         cases)))
 
 (module+ test
@@ -86,32 +77,11 @@
                 (product-field$ "stump" "Topspin")))))
 
   (check-equal?
-   (generate-template "Seeker" (resolve-system mad-lib-system) 's)
+   (generate-sum-template "Seeker" (resolve-system mad-lib-system) 's)
    (cond^
-    (list (cond-case^ (app^ 'string=? '(s "finder")) (hole^))
-          (cond-case^ (app^ 'string=? '(s "gadabout")) (hole^))
-          (cond-case^ (app^ 'string=? '(s "hunter")) (hole^)))))
-  ;; this shouldn't be called during synthesis, but here it is
-  ;; (we should only be introducing templates for sums or products)
-  (check-equal?
-   (generate-template "Topspin" (resolve-system mad-lib-system) 's)
-   's)
-  (check-equal?
-   (generate-template "FishtailPalm" (resolve-system mad-lib-system) 'ft)
-   (app^ (hole^)
-         (list
-          (cond^
-           (list (cond-case^
-                  (app^ 'string=? (list (app^ 'fishtail-palm-sapwood '(ft)) "finder"))
-                  (hole^))
-                 (cond-case^
-                  (app^ 'string=? (list (app^ 'fishtail-palm-sapwood '(ft)) "gadabout"))
-                  (hole^))
-                 (cond-case^
-                  (app^ 'string=? (list (app^ 'fishtail-palm-sapwood '(ft)) "hunter"))
-                  (hole^))))
-          (app^ 'fishtail-palm-duramen '(ft))
-          (app^ 'fishtail-palm-stump '(ft))))))
+    (list (cond-case^ (app^ 'string=? '(s "finder")) (hole^ #t))
+          (cond-case^ (app^ 'string=? '(s "gadabout")) (hole^ #t))
+          (cond-case^ (app^ 'string=? '(s "hunter")) (hole^ #t))))))
 
 ;; turns a system into an environment, by putting product accessors in scope
 (define (system->environment system)

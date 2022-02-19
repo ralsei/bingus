@@ -16,7 +16,8 @@
    base-eval
    (thunk (eval quoted))))
 
-(define (satisfies? prog checks)
+(define (satisfies? data prog checks)
+  (run-eval data)
   (run-eval prog)
   (for/and ([check (in-list checks)])
     (match-define (check^ actual expected) check)

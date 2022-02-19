@@ -119,7 +119,7 @@
 (struct cond-case^ (question answer) #:transparent)
 
 ;; holes
-(struct hole^ () #:transparent)
+(struct hole^ (can-fill-const?) #:transparent)
 
 ;; zipper frames
 (define-struct-zipper-frames lambda^ app^ cond^ cond-case^ hole^)
@@ -172,53 +172,53 @@
      (cond^
       (list
        (cond-case^ (app^ 'not (list (app^ 'false? (list 'x))))
-                   (hole^))
+                   (hole^ #t))
        (cond-case^ (app^ 'false? (list 'x))
-                   (hole^))))))
+                   (hole^ #t))))))
   (check-equal?
    (first-hole/ast cond-2-holes)
-   (zipper (hole^)
+   (zipper (hole^ #t)
            (list (cond-case^-answer-frame (app^ 'not (list (app^ 'false? '(x)))))
-                 (list-item-frame '() (list (cond-case^ (app^ 'false? '(x)) (hole^))))
+                 (list-item-frame '() (list (cond-case^ (app^ 'false? '(x)) (hole^ #t))))
                  (cond^-clauses-frame))))
   (check-equal?
    (next-hole/ast (first-hole/ast cond-2-holes))
-   (zipper (hole^)
+   (zipper (hole^ #t)
            (list (cond-case^-answer-frame (app^ 'false? '(x)))
-                 (list-item-frame (list (cond-case^ (app^ 'not (list (app^ 'false? '(x)))) (hole^))) '())
+                 (list-item-frame (list (cond-case^ (app^ 'not (list (app^ 'false? '(x)))) (hole^ #t))) '())
                  (cond^-clauses-frame))))
 
   (define app-2-holes
-    (zip (app^ 'string=? (list (hole^) (hole^)))))
+    (zip (app^ 'string=? (list (hole^ #t) (hole^ #t)))))
   (define hole-fill
-    (app^ 'string-append (list (hole^) "hi")))
+    (app^ 'string-append (list (hole^ #t) "hi")))
   (check-equal?
    (first-hole/ast app-2-holes)
-   (zipper (hole^)
-           (list (list-item-frame '() (list (hole^)))
+   (zipper (hole^ #t)
+           (list (list-item-frame '() (list (hole^ #t)))
                  (app^-rand-frame 'string=?))))
   (check-equal?
    (plug/ast hole-fill (first-hole/ast app-2-holes))
-   (zipper (app^ 'string-append (list (hole^) "hi"))
-           (list (list-item-frame '() (list (hole^)))
+   (zipper (app^ 'string-append (list (hole^ #t) "hi"))
+           (list (list-item-frame '() (list (hole^ #t)))
                  (app^-rand-frame 'string=?))))
   (check-equal?
    (first-hole/ast (plug/ast hole-fill (first-hole/ast app-2-holes)))
-   (zipper (hole^)
+   (zipper (hole^ #t)
            (list (list-item-frame '() '("hi"))
                  (app^-rand-frame 'string-append)
-                 (list-item-frame '() (list (hole^)))
+                 (list-item-frame '() (list (hole^ #t)))
                  (app^-rand-frame 'string=?))))
   (check-equal?
    (plug/ast 'x (first-hole/ast (plug/ast hole-fill (first-hole/ast app-2-holes))))
    (zipper 'x
            (list (list-item-frame '() '("hi"))
                  (app^-rand-frame 'string-append)
-                 (list-item-frame '() (list (hole^)))
+                 (list-item-frame '() (list (hole^ #t)))
                  (app^-rand-frame 'string=?))))
   (check-equal?
    (next-hole/ast (plug/ast 'x (first-hole/ast (plug/ast hole-fill (first-hole/ast app-2-holes)))))
-   (zipper (hole^)
+   (zipper (hole^ #t)
            (list (list-item-frame (list (app^ 'string-append '(x "hi"))) '())
                  (app^-rand-frame 'string=?)))))
 

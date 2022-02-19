@@ -4,10 +4,10 @@
  zippers
 
  "ast.rkt"
+ "data-definition.rkt"
  "init-environment.rkt"
  "queue.rkt"
  "satisfies.rkt"
- "template.rkt"
  "unparse.rkt"
  "util.rkt")
 
@@ -41,30 +41,41 @@
 ;;
 ;; (this is probably what the Myth paper means by η-long form,
 ;;  since we always do this)
-(define refine/introduce-lambda
-  (let ()
-    (define (introduce-lambda partial-prog)
-      (match-define (partial-program zipped-expr cenv (cons (function$ ins out) tys))
-        partial-prog)
+(define (refine/introduce-lambda rsystem)
+  (define (introduce-lambda partial-prog)
+    (match-define (partial-program zipped-expr cenv (cons (function$ ins out) tys))
+      partial-prog)
 
-      (define args (map (thunk* (gensym)) ins))
-      (define new-cenv
-        (hash-union (for/hash ([arg (in-list args)]
-                               [ty (in-list ins)])
-                      (values arg ty))
-                    cenv))
-      (partial-program
-       (first-hole/ast (plug/ast (lambda^ args (hole^)) zipped-expr))
-       new-cenv
-       (cons out tys)))
+    (define args (map (thunk* (gensym)) ins))
 
-    (define (can-introduce-lambda? partial-prog)
-      (match partial-prog
-        [(partial-program (zipper expr _) _ (cons (function$ _ _) _))
-         (hole^? expr)]
-        [_ #f]))
+    (define with-binders
+      (hash-union (for/hash ([arg (in-list args)]
+                             [ty (in-list ins)])
+                    (values arg ty))
+                  cenv))
 
-    (program-refinement introduce-lambda can-introduce-lambda?)))
+    (define with-struct-accessors
+      (apply hash-union with-binders
+             (for/list ([arg (in-list args)]
+                        [ty (in-list ins)]
+                        #:do [(define decl
+                                (and (string? ty)
+                                     (hash-ref rsystem ty)))]
+                        #:when (product$? decl))
+               (generate-product-environment ty rsystem arg))))
+
+    (partial-program
+     (first-hole/ast (plug/ast (lambda^ args (hole^ #t)) zipped-expr))
+     with-struct-accessors
+     (cons out tys)))
+
+  (define (can-introduce-lambda? partial-prog)
+    (match partial-prog
+      [(partial-program (zipper expr _) _ (cons (function$ _ _) _))
+       (hole^? expr)]
+      [_ #f]))
+
+  (program-refinement introduce-lambda can-introduce-lambda?))
 
 (define (refine/guess-var v)
   (define (guess-var partial-prog)
@@ -101,6 +112,7 @@
   (define (can-guess-const? partial-prog)
     (match-define (partial-program (zipper focus _) _ tys) partial-prog)
     (and (hole^? focus)
+         (hole^-can-fill-const? focus)
          (not (empty? tys))
          (match (first tys)
            [(number-atom$) (number? c)]
@@ -115,9 +127,14 @@
     (match-define (partial-program zipped-expr cenv (cons ty tys))
       partial-prog)
     (match-define (function$ ins _) (hash-ref cenv fn))
+
+    (define args
+      (cons (hole^ #f)
+            (map (const (hole^ #t)) (rest ins))))
+
     (partial-program
      (first-hole/ast
-      (plug/ast (app^ fn (map (const (hole^)) ins)) zipped-expr))
+      (plug/ast (app^ fn args) zipped-expr))
      cenv
      (append ins tys)))
 
@@ -131,30 +148,28 @@
 
   (program-refinement guess-app can-guess-app?))
 
-#;(define (refine/guess-template rsystem name)
-  ;; TODO: this doesn't work for products yet.
-
+(define (refine/guess-template sig rsystem var-name)
   (define (guess-template partial-prog)
-    (match-define (partial-program (zipper focus _) _ tys) partial-prog)
-    (define data-decl (hash-ref rsystem name))
-    (define n-holes
-      (cond [(sum$? data-decl) (length (sum$-cases data-decl))]
-            [(product$? data-decl) (error 'guess-template "products not supported yet")]))
+    (match-define (partial-program zipped-expr cenv (cons ty tys))
+      partial-prog)
+    (match-define (sum$ _ cases) (hash-ref rsystem sig))
+
     (partial-program
      (first-hole/ast
-      (plug/ast (generate-template name rsystem)))
-    (TODO))
+      (plug/ast (generate-sum-template sig rsystem var-name) zipped-expr))
+     cenv
+     (append (make-list (length cases) ty)
+             tys)))
 
   (define (can-guess-template? partial-prog)
-    (match-define (partial-program (zipper focus ctx) _ tys) partial-prog)
-    (define data-decl (hash-ref rsystem name #f))
+    ; we can actually *always* guess a template, so long as we have something
+    ; that works
+    (match-define (partial-program (zipper focus _) cenv tys) partial-prog)
     (and (hole^? focus)
-         (not (empty? ctx)) ; avoid introducing templates being the first thing
          (not (empty? tys))
-         ;; only introduce templates if introducing templates makes sense
-         ;; (also note that this fails if it's not in the rsystem)
-         (or (product$? data-decl)
-             (sum$? data-decl))))
+         ; products are handled by introduce-lambda,
+         ; where they're added to the environment as variables
+         (sum$? (hash-ref rsystem (hash-ref cenv var-name) #f))))
 
   (program-refinement guess-template can-guess-template?))
 
@@ -185,7 +200,7 @@
   (match-define (partial-program _ cenv _) partial-prog)
 
   (define possible
-    (append (list refine/introduce-lambda)
+    (append (list (refine/introduce-lambda rsystem))
             (for/list ([(var ty) (in-hash cenv)]
                        #:when (not (function$? ty)))
               (refine/guess-var var))
@@ -193,7 +208,9 @@
               (refine/guess-const atom))
             (for/list ([(var ty) (in-hash cenv)]
                        #:when (function$? ty))
-              (refine/guess-app var))))
+              (refine/guess-app var))
+            (for/list ([(var ty) (in-hash cenv)])
+              (refine/guess-template ty rsystem var))))
 
   (for/list ([movement (in-list possible)]
              #:when (can-refine? movement partial-prog))
@@ -208,10 +225,14 @@
            (define-values (prog others) (dequeue q))
 
            (match-define (partial-program zipped-expr _ tys) prog)
+           (writeln (unparse (rebuild zipped-expr)))
            (define adj (possible-refinements prog rsystem checks))
            (cond [(empty? tys)
                   (define expr (rebuild zipped-expr))
-                  (cond [(satisfies? (unparse expr) checks) expr]
+                  (cond [(satisfies? (unparse-system system)
+                                     (unparse expr)
+                                     checks)
+                         expr]
                         [else (do-bfs others)])]
                  [(empty? adj) (do-bfs others)]
                  [else
@@ -223,5 +244,68 @@
 
   (do-bfs
    (enqueue
-    (partial-program (zip (hole^)) init-bsl-environment (list init-ty))
+    (partial-program (zip (hole^ #f)) init-bsl-environment (list init-ty))
     empty-queue)))
+
+(define tl-system
+  (list
+   (sum$ "TrafficLight"
+         (list (sum-case$ (singleton-atom$ "red"))
+               (sum-case$ (singleton-atom$ "yellow"))
+               (sum-case$ (singleton-atom$ "green"))))))
+(pretty-print
+ (unparse
+  (run-synth
+   ; TrafficLight -> String
+   (function$ (list "TrafficLight") (string-atom$))
+   tl-system
+   (list
+    (check^ '(func "red") "no don't")
+    (check^ '(func "yellow") "if you're brave")
+    (check^ '(func "green") "go ahead")))))
+
+;; this absolutely definitely does NOT work lmao
+#;(define indiana-system
+  (list
+   (product$ "Address"
+             (list (product-field$ "street" (string-atom$))
+                   (product-field$ "apartment" (number-atom$))
+                   (product-field$ "city" (string-atom$))
+                   (product-field$ "zip" (number-atom$))))))
+#;(pretty-print
+ (unparse
+  (run-synth
+   ; Address -> Boolean
+   (function$ (list "Address") (boolean-atom$))
+   indiana-system
+   (list
+    (check^ '(func (make-address "700 N Woodlawn Ave"
+                                 2062
+                                 "Bloomington"
+                                 47408))
+            #true)
+    (check^ '(func (make-address "831 E 3rd St"
+                                 104
+                                 "Absolutely, Totally, Not Bloomington"
+                                 47405))
+            #true)
+    (check^ '(func (make-address "The Edge Of Indiana"
+                                 0
+                                 "Gary"
+                                 46000))
+            #true)
+    (check^ '(func (make-address "The Other Edge Of Indiana"
+                                 100
+                                 "Evansville"
+                                 47999))
+            #true)
+    (check^ '(func (make-address "333 East Scrimblo Lane"
+                                 2062
+                                 "Poggersdorf"
+                                 19482))
+            #false)
+    (check^ '(func (make-address "444 East Crumbus Ave"
+                                 0
+                                 "Fucking"
+                                 99999))
+            #false)))))

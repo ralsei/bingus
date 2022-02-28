@@ -12,14 +12,7 @@
  "util.rkt")
 
 ;;;; PARTIAL PROGRAMS
-;; a partial program is:
-;; - a zipped expression (possibly with a hole)
-;; - a compile-time environment (a hash table of terms to types, no values)
-;; - a list of hole types
-;; -- this can change, since the hole changes
-;; -- if there are multiple holes, we fill the leftmost hole, then move right
-;; a complete program is a partial program with no holes
-(struct partial-program (expr cenv type) #:transparent)
+;; a partial program is a zipper of an AST.
 
 ;; an refinement is a pair of functions:
 ;; - partial-program? -> partial-program?
@@ -27,8 +20,11 @@
 ;; - partial-program? -> boolean?
 ;;   that determines if the action can be applied
 ;;
-;; we don't check if it can be applied before applying it
-;; (for performance reasons)
+;; we don't check if it can be applied before applying it,
+;; that's done during the BFS.
+;;
+;; we terminate when we're no longer focused on a hole.
+;; each refinement should jump to the next hole.
 (struct program-refinement (refine possible?)
   #:property prop:procedure (struct-field-index refine)
   #:transparent)
@@ -43,7 +39,7 @@
 ;;  since we always do this)
 (define (refine/introduce-lambda rsystem)
   (define (introduce-lambda partial-prog)
-    (match-define (partial-program zipped-expr cenv (cons (function$ ins out) tys))
+    (match-define (zipper (hole^ _ cenv (function$ ins out) checks) _)
       partial-prog)
 
     (define args (map (thunk* (gensym)) ins))
@@ -64,57 +60,37 @@
                         #:when (product$? decl))
                (generate-product-environment ty rsystem arg))))
 
-    (partial-program
-     (first-hole/ast (plug/ast (lambda^ args (hole^ #t)) zipped-expr))
-     with-struct-accessors
-     (cons out tys)))
+    (first-hole/ast
+     (plug/ast (lambda^ args (hole^ #t with-struct-accessors out checks))
+               partial-prog)))
 
   (define (can-introduce-lambda? partial-prog)
     (match partial-prog
-      [(partial-program (zipper expr _) _ (cons (function$ _ _) _))
-       (hole^? expr)]
+      [(zipper (hole^ _ _ (function$ _ _) _) _) #t]
       [_ #f]))
 
   (program-refinement introduce-lambda can-introduce-lambda?))
 
 (define (refine/guess-var v)
   (define (guess-var partial-prog)
-    (match-define (partial-program zipped-expr cenv tys)
-      partial-prog)
-    (define new-tys (rest tys))
-    (partial-program
-     ((cond [(empty? new-tys) identity]
-            [else next-hole/ast])
-      (plug/ast v zipped-expr))
-     cenv
-     new-tys))
+    (next-hole/ast (plug/ast v partial-prog)))
 
   (define (can-guess-var? partial-prog)
-    (match-define (partial-program (zipper focus _) cenv tys) partial-prog)
+    (match-define (zipper focus _) partial-prog)
     (and (hole^? focus)
-         (not (empty? tys))
-         (equal? (hash-ref cenv v #f) (first tys))))
+         (equal? (hash-ref (hole^-cenv focus) v #f) (hole^-signature focus))))
 
   (program-refinement guess-var can-guess-var?))
 
 (define (refine/guess-const c)
   (define (guess-const partial-prog)
-    (match-define (partial-program zipped-expr cenv tys)
-      partial-prog)
-    (define new-tys (rest tys))
-    (partial-program
-     ((cond [(empty? new-tys) identity]
-            [else next-hole/ast])
-      (plug/ast c zipped-expr))
-     cenv
-     new-tys))
+    (next-hole/ast (plug/ast c partial-prog)))
 
   (define (can-guess-const? partial-prog)
-    (match-define (partial-program (zipper focus _) _ tys) partial-prog)
+    (match-define (zipper focus _) partial-prog)
     (and (hole^? focus)
          (hole^-can-fill-const? focus)
-         (not (empty? tys))
-         (match (first tys)
+         (match (hole^-signature focus)
            [(number-atom$) (number? c)]
            [(string-atom$) (string? c)]
            [(boolean-atom$) (boolean? c)]
@@ -124,52 +100,46 @@
 
 (define (refine/guess-app fn)
   (define (guess-app partial-prog)
-    (match-define (partial-program zipped-expr cenv (cons ty tys))
+    (match-define (zipper (hole^ _ cenv sig checks) _)
       partial-prog)
     (match-define (function$ ins _) (hash-ref cenv fn))
 
     (define args
-      (cons (hole^ #f)
-            (map (const (hole^ #t)) (rest ins))))
+      (cons (hole^ #f cenv (first ins) checks)
+            (map (λ (in) (hole^ #t cenv in checks)) (rest ins))))
 
-    (partial-program
-     (first-hole/ast
-      (plug/ast (app^ fn args) zipped-expr))
-     cenv
-     (append ins tys)))
+    (first-hole/ast (plug/ast (app^ fn args) partial-prog)))
 
   (define (can-guess-app? partial-prog)
-    (match-define (partial-program (zipper focus _) cenv tys) partial-prog)
+    (match-define (zipper focus _) partial-prog)
     (and (hole^? focus)
-         (not (empty? tys))
-         (let ([ty (hash-ref cenv fn #f)])
-           (and (function$? ty)
-                (equal? (function$-output ty) (first tys))))))
+         (let ([sig (hash-ref (hole^-cenv focus) fn #f)])
+           (and (function$? sig)
+                (equal? (function$-output sig) (hole^-signature focus))))))
 
   (program-refinement guess-app can-guess-app?))
 
-(define (refine/guess-template sig rsystem var-name)
+(define (refine/guess-template sum rsystem var-name)
   (define (guess-template partial-prog)
-    (match-define (partial-program zipped-expr cenv (cons ty tys))
+    (match-define (zipper (hole^ _ cenv sig checks) _)
       partial-prog)
-    (match-define (sum$ _ cases) (hash-ref rsystem sig))
+    (match-define (sum$ _ cases) (hash-ref rsystem sum))
 
-    (partial-program
-     (first-hole/ast
-      (plug/ast (generate-sum-template sig rsystem var-name) zipped-expr))
-     cenv
-     (append (make-list (length cases) ty)
-             tys)))
+    (first-hole/ast
+     (plug/ast (generate-sum-template sum rsystem
+                                      #:var-name var-name
+                                      #:cenv cenv
+                                      #:signature sig
+                                      #:checks checks))))
 
   (define (can-guess-template? partial-prog)
     ; we can actually *always* guess a template, so long as we have something
     ; that works
-    (match-define (partial-program (zipper focus _) cenv tys) partial-prog)
+    (match-define (zipper focus _) partial-prog)
     (and (hole^? focus)
-         (not (empty? tys))
          ; products are handled by introduce-lambda,
          ; where they're added to the environment as variables
-         (sum$? (hash-ref rsystem (hash-ref cenv var-name) #f))))
+         (sum$? (hash-ref rsystem (hash-ref (hole^-cenv focus) var-name) #f))))
 
   (program-refinement guess-template can-guess-template?))
 
@@ -196,8 +166,8 @@
             consts)))
 
 ;; XXX: there should be some kind of weighting here
-(define (possible-refinements partial-prog rsystem checks)
-  (match-define (partial-program _ cenv _) partial-prog)
+(define (possible-refinements partial-prog rsystem)
+  (match-define (zipper (hole^ _ cenv _ checks) _) partial-prog)
 
   (define possible
     (append (list (refine/introduce-lambda rsystem))
@@ -224,33 +194,30 @@
           [else
            (define-values (prog others) (dequeue q))
 
-           (match-define (partial-program zipped-expr _ tys) prog)
-           (writeln (unparse (rebuild zipped-expr)))
-           (define adj (possible-refinements prog rsystem checks))
-           (cond [(empty? tys)
-                  (define expr (rebuild zipped-expr))
+           (match-define (zipper focus _) prog)
+           #;(writeln (unparse (rebuild prog)))
+           (cond [(not (hole^? focus))
+                  (define expr (rebuild prog))
                   (cond [(satisfies? (unparse-system system)
                                      (unparse expr)
                                      checks)
                          expr]
                         [else (do-bfs others)])]
-                 [(empty? adj) (do-bfs others)]
                  [else
                   (define next-layer
                     (for/fold ([new-queue others])
-                              ([movement (in-list adj)])
+                              ([movement (in-list (possible-refinements prog rsystem))])
                       (enqueue (movement prog) new-queue)))
-                  (do-bfs next-layer)])]))
+                  (do-bfs (cond [(empty? next-layer) others]
+                                [else next-layer]))])]))
 
   (do-bfs
    (enqueue
-    (partial-program (zip (hole^ #f))
-                     ; add the function itself, for recursion
-                     ; TODO: we should only recur structurally, probably
-                     (hash-union
-                      init-bsl-environment
-                      (system->environment system))
-                     (list init-ty))
+    (zip (hole^ #f
+                (hash-union init-bsl-environment
+                            (system->environment system))
+                init-ty
+                checks))
     empty-queue)))
 
 ;;; various tests

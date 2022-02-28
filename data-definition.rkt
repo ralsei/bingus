@@ -30,6 +30,10 @@
     (values (type-name ty)
             (resolve-alias (type-name ty)))))
 
+;; turn each product field into an entry in the environment,
+;; UNLESS it's recursive, in which case insert recursion here
+;;
+;; TODO: actually do the above
 (define (generate-product-environment name rsystem var-name)
   (match-define (product$ (app pascal->kebab struct-name) fields) (hash-ref rsystem name))
   (for/hash ([fld (in-list fields)])
@@ -38,7 +42,11 @@
       (string->symbol (string-append struct-name "-" accessor-name)))
     (values (app^ accessor (list var-name)) ty)))
 
-(define (generate-sum-template name rsystem var-name)
+(define (generate-sum-template name rsystem
+                               #:var-name var-name
+                               #:cenv cenv
+                               #:signature sig
+                               #:checks checks)
   (define (generate-cond-question ty)
     (match ty
       ;; if it's a constant, check it
@@ -65,7 +73,8 @@
   (match-define (sum$ _ cases) (hash-ref rsystem name))
   (cond^
    (map (λ (x)
-          (cond-case^ (generate-cond-question (sum-case$-type x)) (hole^ #t)))
+          (cond-case^ (generate-cond-question (sum-case$-type x))
+                      (hole^ #t cenv sig checks)))
         cases)))
 
 (module+ test
@@ -118,8 +127,7 @@
     (match-define (product$ struct-name fields) ty)
     (define kebab-name (pascal->kebab struct-name))
 
-    (
-     hash-set* env
+    (hash-set* env
      (string->symbol (string-append "make-" kebab-name))
      (function$ (map product-field$-type fields) struct-name)
      (string->symbol (string-append kebab-name "?"))

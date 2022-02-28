@@ -24,8 +24,7 @@
  (struct-zipper-out lambda^
                     app^
                     cond^
-                    cond-case^
-                    hole^)
+                    cond-case^)
  ;;;; SYNTAX HELPERS
  plug/ast
  first-hole/ast
@@ -119,10 +118,12 @@
 (struct cond-case^ (question answer) #:transparent)
 
 ;; holes
-(struct hole^ (can-fill-const?) #:transparent)
+(struct hole^ (can-fill-const? cenv signature checks) #:transparent)
 
 ;; zipper frames
-(define-struct-zipper-frames lambda^ app^ cond^ cond-case^ hole^)
+;; we explicitly don't define one for a hole, since you shouldn't be able
+;; to zip into one
+(define-struct-zipper-frames lambda^ app^ cond^ cond-case^)
 
 ;; utility functions (derived movements)
 ;; go all the way left through the ast
@@ -139,12 +140,14 @@
 
 ;; goes to the next ancestor
 (define (next-ancestor/ast exp)
-  (match-define (zipper focus (cons first-ctx _)) exp)
   (cond [(zipper-at-top? exp) exp]
-        [(list-item-frame? first-ctx)
-         (cond [(empty? (list-item-frame-to-right first-ctx)) (up exp)]
-               [else (right/list exp)])]
-        [else (next-ancestor/ast (up exp))]))
+        [else
+         (match-define (zipper focus (cons first-ctx _)) exp)
+         (cond
+           [(list-item-frame? first-ctx)
+            (cond [(empty? (list-item-frame-to-right first-ctx)) (up exp)]
+                  [else (right/list exp)])]
+           [else (next-ancestor/ast (up exp))])]))
 
 (define (next/ast exp)
   (first/ast (next-ancestor/ast exp)))
@@ -156,71 +159,14 @@
 
 (define (next-hole/ast exp)
   (match-define (and result (zipper focus _)) (next/ast exp))
-  (cond [(hole^? focus) result]
+  (cond [(zipper-at-top? exp) exp]
+        [(hole^? focus) result]
         [else (next-hole/ast (up exp))]))
 
 ;; fill the given hole, and go to the next one
 (define (plug/ast fill exp)
   (cond [(hole^? (zipper-focus exp)) (edit (const fill) exp)]
         [else (error 'plug/ast "not focused on a hole: ~a" exp)]))
-
-(module+ test
-  (require rackunit)
-
-  (define cond-2-holes
-    (zip
-     (cond^
-      (list
-       (cond-case^ (app^ 'not (list (app^ 'false? (list 'x))))
-                   (hole^ #t))
-       (cond-case^ (app^ 'false? (list 'x))
-                   (hole^ #t))))))
-  (check-equal?
-   (first-hole/ast cond-2-holes)
-   (zipper (hole^ #t)
-           (list (cond-case^-answer-frame (app^ 'not (list (app^ 'false? '(x)))))
-                 (list-item-frame '() (list (cond-case^ (app^ 'false? '(x)) (hole^ #t))))
-                 (cond^-clauses-frame))))
-  (check-equal?
-   (next-hole/ast (first-hole/ast cond-2-holes))
-   (zipper (hole^ #t)
-           (list (cond-case^-answer-frame (app^ 'false? '(x)))
-                 (list-item-frame (list (cond-case^ (app^ 'not (list (app^ 'false? '(x)))) (hole^ #t))) '())
-                 (cond^-clauses-frame))))
-
-  (define app-2-holes
-    (zip (app^ 'string=? (list (hole^ #t) (hole^ #t)))))
-  (define hole-fill
-    (app^ 'string-append (list (hole^ #t) "hi")))
-  (check-equal?
-   (first-hole/ast app-2-holes)
-   (zipper (hole^ #t)
-           (list (list-item-frame '() (list (hole^ #t)))
-                 (app^-rand-frame 'string=?))))
-  (check-equal?
-   (plug/ast hole-fill (first-hole/ast app-2-holes))
-   (zipper (app^ 'string-append (list (hole^ #t) "hi"))
-           (list (list-item-frame '() (list (hole^ #t)))
-                 (app^-rand-frame 'string=?))))
-  (check-equal?
-   (first-hole/ast (plug/ast hole-fill (first-hole/ast app-2-holes)))
-   (zipper (hole^ #t)
-           (list (list-item-frame '() '("hi"))
-                 (app^-rand-frame 'string-append)
-                 (list-item-frame '() (list (hole^ #t)))
-                 (app^-rand-frame 'string=?))))
-  (check-equal?
-   (plug/ast 'x (first-hole/ast (plug/ast hole-fill (first-hole/ast app-2-holes))))
-   (zipper 'x
-           (list (list-item-frame '() '("hi"))
-                 (app^-rand-frame 'string-append)
-                 (list-item-frame '() (list (hole^ #t)))
-                 (app^-rand-frame 'string=?))))
-  (check-equal?
-   (next-hole/ast (plug/ast 'x (first-hole/ast (plug/ast hole-fill (first-hole/ast app-2-holes)))))
-   (zipper (hole^ #t)
-           (list (list-item-frame (list (app^ 'string-append '(x "hi"))) '())
-                 (app^-rand-frame 'string=?)))))
 
 ;;;; CHECKS
 ;; (check-expect (add1 5) 6)

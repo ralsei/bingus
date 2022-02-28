@@ -19,7 +19,7 @@
      `(cond ,@(map unparse clauses))]
     [(cond-case^ question answer)
      `(,(unparse question) ,(unparse answer))]
-    [(hole^ _) 'HOLE]
+    [(hole^ _ _ _ _) 'HOLE]
     [_ (error 'unparse "unsupported form: ~a" exp)]))
 
 ;; insert define-structs if there are some

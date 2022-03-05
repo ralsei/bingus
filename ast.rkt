@@ -14,7 +14,8 @@
               product-field$
               sum$
               sum-case$
-              alias$)
+              defn$
+              recur$)
  ;;;; SYNTAX
  (structs-out lambda^
               app^
@@ -58,14 +59,6 @@
 (struct function$ (inputs output) #:transparent)
 
 ;; structures/products
-;; A Position is a (make-position Number Number)
-;; (struct position (x y))
-;; =>
-;; (product$
-;;  "Position"
-;;  (list
-;;   (product-field$ "x" (number-atom$))
-;;   (product-field$ "y" (number-atom$))))
 (struct product$ (name fields) #:transparent)
 (struct product-field$ (name type) #:transparent)
 
@@ -76,19 +69,20 @@
 ;; - "green"
 ;; =>
 ;; (sum$
-;;  "TrafficLight"
 ;;  (list
 ;;   (sum-case$ (singleton-atom$ "red"))
 ;;   (sum-case$ (singleton-atom$ "yellow"))
 ;;   (sum-case$ (singleton-atom$ "green"))))
-(struct sum$ (name cases) #:transparent)
+(struct sum$ (cases) #:transparent)
 (struct sum-case$ (type) #:transparent)
 
-;; type alias
-;; A Time is a Number
-;; =>
-;; (alias$ "Time" (number-atom$))
-(struct alias$ (name type) #:transparent)
+;; definitions -- top-level signatures
+(struct defn$ (name type) #:transparent)
+
+;; marks recursion in a resolved system
+;; TODO: mutual rcursion -- hence why the `on` field is here
+;;       right now it's just set to the name of the type and is unused
+(struct recur$ (on) #:transparent)
 
 ;;;; SYNTAX
 ;; variables are just symbols

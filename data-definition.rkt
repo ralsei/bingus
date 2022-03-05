@@ -1,141 +1,210 @@
 #lang racket
-(require "ast.rkt"
+(require racket/hash
+         racket/syntax
+
+         "ast.rkt"
          "util.rkt")
 (provide resolve-system
          generate-sum-template
          generate-product-environment
          system->environment)
 
-;; a system is a list of products, sums, and aliases
-;; (read: top-level signature definitions)
+(define (system-ref name system)
+  (for/first ([defn (in-list system)]
+              #:when (equal? (defn$-name defn) name))
+    (defn$-type defn)))
 
-(define (type-name ty)
-  (cond [(product$? ty) (product$-name ty)]
-        [(sum$? ty) (sum$-name ty)]
-        [(alias$? ty) (alias$-name ty)]))
-
-(define (system-lookup name system)
-  (for/first ([ty (in-list system)]
-              #:when (equal? (type-name ty) name))
-    ty))
-
+;; a system is a list of defn$ses,
+;; which correspond to top-level definitions
+;;
+;; a resolved system is a hash of strings to signatures,
+;; with no definitions, and no indirection
+;;
+;; recursion is replaced with a marker, which signifies the type
+;; to recur on
+;; NOTE: right now that's just the single type, since we don't
+;;       synthesize helpers
 (define (resolve-system system)
-  (define (resolve-alias name)
-    (let loop ([current-val (alias$ name name)])
-      (cond [(not (alias$? current-val)) current-val]
-            [(not (string? (alias$-type current-val))) (alias$-type current-val)]
-            [else (loop (system-lookup (alias$-type current-val) system))])))
+  (define ((insert-recursion name) sig)
+    (match sig
+      [(? string?) (cond [(equal? sig name) (recur$ sig)]
+                         [else (resolve-defn sig)])]
+      [(product$ n fields) (product$ n (map (insert-recursion name) fields))]
+      [(product-field$ n type) (product-field$ n ((insert-recursion name) type))]
+      [(sum$ cases) (sum$ (map (insert-recursion name) cases))]
+      [(sum-case$ ty) (sum-case$ ((insert-recursion name) ty))]
+      ;; TODO: look into this more. this is very wrong lol
+      [y y]))
 
-  (for/hash ([ty (in-list system)])
-    (values (type-name ty)
-            (resolve-alias (type-name ty)))))
+  (define (resolve-defn name)
+    (let loop ([current-val name])
+      (cond [(not (string? current-val)) ((insert-recursion name) current-val)]
+            [else (loop (system-ref name system))])))
+
+  (for/hash ([decl (in-list system)])
+    (values (defn$-name decl)
+            (resolve-defn (defn$-name decl)))))
 
 ;; turn each product field into an entry in the environment,
 ;; UNLESS it's recursive, in which case insert recursion here
-;;
-;; TODO: actually do the above
-(define (generate-product-environment name rsystem var-name)
-  (match-define (product$ (app pascal->kebab struct-name) fields) (hash-ref rsystem name))
-  (for/hash ([fld (in-list fields)])
-    (match-define (product-field$ accessor-name ty) fld)
+(define (generate-product-environment ty var-name)
+  (match-define (product$ struct-name fields) ty)
+
+  (for/fold ([cenv (hash)])
+            ([fld (in-list fields)])
+    (match-define (product-field$ accessor-name out) fld)
     (define accessor
-      (string->symbol (string-append struct-name "-" accessor-name)))
-    (values (app^ accessor (list var-name)) ty)))
+      (format-symbol "~a-~a" struct-name accessor-name))
+
+    ;; TODO: this only works for unary recursion
+    ;; (so like, sum-numbers)
+    ;; the fix for this is to pass in the function signature and then do natural recursion
+    ;;
+    ;; also the function name is hardcoded, which is not great
+    (match out
+      [(recur$ on)
+       (hash-set* cenv
+                  (app^ accessor (list var-name)) on
+                  (app^ 'func (app^ accessor (list var-name))) on)]
+      [_ (hash-set cenv (app^ accessor (list var-name)) out)])))
 
 (define (generate-sum-template name rsystem
                                #:var-name var-name
                                #:cenv cenv
                                #:signature sig
                                #:checks checks)
-  (define (generate-cond-question ty)
+  (define (generate-cond-clause ty)
     (match ty
-      ;; if it's a constant, check it
       [(singleton-atom$ val)
-       (cond [(string? val) (app^ 'string=? (list var-name val))]
-             [(number? val) (app^ '= (list var-name val))]
-             [(boolean? val) (if val
-                                 (app^ 'not (app^ 'false? (list var-name)))
-                                 (app^ 'false? (list var-name)))]
-             [else (error 'generate-sum-template
-                          "invalid singleton value: ~a of signature ~a"
-                          val ty)])]
-      ;; it's probably a product, try looking it up
-      [(? string? val)
-       (define maybe-product (hash-ref rsystem val))
-       (cond [(product$? maybe-product)
-              (define predicate
-                (string->symbol
-                 (string-append (pascal->kebab (product$-name maybe-product)) "?")))
-              (app^ predicate (list var-name))]
-             [else (error 'generate-sum-template "not a struct: ~a" ty)])]
+       (cond-case^
+        (cond [(string? val) (app^ 'string=? (list var-name val))]
+              [(number? val) (app^ '= (list var-name val))]
+              [(boolean? val) (if val
+                                  (app^ 'not (app^ 'false? (list var-name)))
+                                  (app^ 'false? (list var-name)))]
+              [else (error 'generate-sum-template
+                           "invalid singleton value: ~a of signature ~a"
+                           val ty)])
+        (hole^ #t cenv sig checks))]
+      [(product$ name _)
+       (cond-case^
+        (app^ (string->symbol (string-append name "?")) (list var-name))
+        (hole^ #t
+               (hash-union cenv (generate-product-environment ty var-name))
+               sig
+               ;; TODO: narrow checks here
+               checks))]
       [_ (error 'generate-sum-template "currently unsupported: ~a" ty)]))
 
-  (match-define (sum$ _ cases) (hash-ref rsystem name))
+  (match-define (sum$ cases) (hash-ref rsystem name))
   (cond^
    (map (λ (x)
-          (cond-case^ (generate-cond-question (sum-case$-type x))
-                      (hole^ #t cenv sig checks)))
+          (generate-cond-clause (sum-case$-type x)))
         cases)))
+
+;; turns a system into an environment, by putting product accessors in scope
+;; TODO: this has to be recursive now, b/c unions
+(define (system->environment system)
+  (for/fold ([env (hash)])
+            ([defn (in-list system)]
+             #:when (product$? (defn$-type defn)))
+    (match-define (product$ struct-name fields) (defn$-type defn))
+
+    (hash-set* env
+               (format-symbol "make-~a" struct-name)
+               (function$ (map product-field$-type fields) (defn$-name defn))
+     ;; commented out for now, as guessing something? isn't useful
+     #;(string->symbol (string-append struct-name "?"))
+     #;(function$ (list (anything$)) (boolean-atom$)))))
 
 (module+ test
   (require rackunit)
 
   (define mad-lib-system
     (list
-     (sum$ "Seeker"
-           (list
-            (sum-case$ (singleton-atom$ "finder"))
-            (sum-case$ (singleton-atom$ "gadabout"))
-            (sum-case$ (singleton-atom$ "hunter"))))
-     (alias$ "Topspin" (string-atom$))
-     (alias$ "Tokamak" (string-atom$))
-     (product$ "FishtailPalm"
-               (list
-                (product-field$ "sapwood" "Seeker")
-                (product-field$ "duramen" "Tokamak")
-                (product-field$ "stump" "Topspin")))))
+     (defn$ "Seeker"
+       (sum$ (list
+              (sum-case$ (singleton-atom$ "finder"))
+              (sum-case$ (singleton-atom$ "gadabout"))
+              (sum-case$ (singleton-atom$ "hunter")))))
+     (defn$ "Topspin" (string-atom$))
+     (defn$ "Tokamak" (string-atom$))
+     (defn$ "FishtailPalm"
+       (product$ "fishtail-palm"
+                 (list
+                  (product-field$ "sapwood" "Seeker")
+                  (product-field$ "duramen" "Tokamak")
+                  (product-field$ "stump" "Topspin"))))))
 
   (check-equal?
-   (generate-sum-template "Seeker" (resolve-system mad-lib-system) 's)
+   (resolve-system mad-lib-system)
+   (hash
+    "FishtailPalm" (product$
+                    "fishtail-palm"
+                    (list
+                     (product-field$
+                      "sapwood"
+                      (sum$
+                       (list
+                        (sum-case$ (singleton-atom$ "finder"))
+                        (sum-case$ (singleton-atom$ "gadabout"))
+                        (sum-case$ (singleton-atom$ "hunter")))))
+                     (product-field$ "duramen" (string-atom$))
+                     (product-field$ "stump" (string-atom$))))
+    "Seeker" (sum$
+              (list
+               (sum-case$ (singleton-atom$ "finder"))
+               (sum-case$ (singleton-atom$ "gadabout"))
+               (sum-case$ (singleton-atom$ "hunter"))))
+    "Tokamak" (string-atom$)
+    "Topspin" (string-atom$)))
+
+  (check-equal?
+   (generate-sum-template "Seeker" (resolve-system mad-lib-system)
+                          #:var-name 's
+                          #:cenv (hash)
+                          #:signature (number-atom$)
+                          #:checks '())
    (cond^
-    (list (cond-case^ (app^ 'string=? '(s "finder")) (hole^ #t))
-          (cond-case^ (app^ 'string=? '(s "gadabout")) (hole^ #t))
-          (cond-case^ (app^ 'string=? '(s "hunter")) (hole^ #t)))))
+    (list
+     (cond-case^ (app^ 'string=? '(s "finder")) (hole^ #t '#hash() (number-atom$) '()))
+     (cond-case^ (app^ 'string=? '(s "gadabout")) (hole^ #t '#hash() (number-atom$) '()))
+     (cond-case^ (app^ 'string=? '(s "hunter")) (hole^ #t '#hash() (number-atom$) '())))))
 
   (define bon-system
     (list
-     (product$ "None" '())
-     (product$ "Some"
-               (list (product-field$ "first" (number-atom$))
-                     (product-field$ "rest" "BunchOfNumbers")))
-     (sum$ "BunchOfNumbers"
-           (list (sum-case$ "None")
-                 (sum-case$ "Some")))))
+     (defn$ "BunchOfNumbers"
+       (sum$ (list (sum-case$ (product$ "none" '()))
+                   (sum-case$ (product$ "some"
+                                        (list
+                                         (product-field$ "first" (number-atom$))
+                                         (product-field$ "rest" "BunchOfNumbers")))))))))
 
   (check-equal?
-   (generate-sum-template "BunchOfNumbers" (resolve-system bon-system) 'bon)
+   (resolve-system bon-system)
+   (hash
+    "BunchOfNumbers"
+    (sum$
+     (list
+      (sum-case$ (product$ "none" '()))
+      (sum-case$
+       (product$ "some" (list (product-field$ "first" (number-atom$))
+                              (product-field$ "rest" (recur$ "BunchOfNumbers")))))))))
+
+  (check-equal?
+   (generate-sum-template "BunchOfNumbers" (resolve-system bon-system)
+                          #:var-name 'bon
+                          #:cenv (hash)
+                          #:signature (number-atom$)
+                          #:checks '())
    (cond^
     (list
-     (cond-case^ (app^ 'none? '(bon)) (hole^ #t))
-     (cond-case^ (app^ 'some? '(bon)) (hole^ #t))))))
-
-;; turns a system into an environment, by putting product accessors in scope
-(define (system->environment system)
-  (for/fold ([env (hash)])
-            ([ty (in-list system)]
-             #:when (product$? ty))
-    (match-define (product$ struct-name fields) ty)
-    (define kebab-name (pascal->kebab struct-name))
-
-    (hash-set* env
-     (string->symbol (string-append "make-" kebab-name))
-     (function$ (map product-field$-type fields) struct-name)
-     (string->symbol (string-append kebab-name "?"))
-     (function$ (list (anything$)) (boolean-atom$))
-     #;(for/fold ([xs '()])
-               ([fld fields])
-       (match-define (product-field$ field-name type) fld)
-       (define accessor
-         (string->symbol (string-append kebab-name "-" field-name)))
-       (append (list accessor (function$ (list struct-name) type))
-               xs)))))
+     (cond-case^ (app^ 'none? '(bon)) (hole^ #t '#hash() (number-atom$) '()))
+     (cond-case^ (app^ 'some? '(bon))
+                 (hole^
+                  #t
+                  (hash (app^ 'some-first '(bon)) (number-atom$)
+                        (app^ 'func (app^ 'some-rest '(bon))) "BunchOfNumbers"
+                        (app^ 'some-rest '(bon)) "BunchOfNumbers")
+                  (number-atom$)
+                  '()))))))

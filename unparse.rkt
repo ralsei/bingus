@@ -19,14 +19,18 @@
      `(cond ,@(map unparse clauses))]
     [(cond-case^ question answer)
      `(,(unparse question) ,(unparse answer))]
-    [(hole^ _ _ _ _) 'HOLE]
+    [(hole^ can-fill-const? cenv sig checks)
+     `(DEBUG-HOLE ,can-fill-const?
+                  ,cenv
+                  ,sig
+                  ,checks)]
     [_ (error 'unparse "unsupported form: ~a" exp)]))
 
 ;; insert define-structs if there are some
 (define (unparse-struct decl)
   (match-define (product$ name fields) decl)
   `(define-struct
-     ,(string->symbol (pascal->kebab name))
+     ,(string->symbol name)
      (,@(map (compose string->symbol product-field$-name) fields))))
 
 (define (unparse-system sys)
@@ -52,7 +56,7 @@
 
   (check-equal?
    (unparse-struct
-    (product$ "FishtailPalm"
+    (product$ "fishtail-palm"
               (list
                (product-field$ "sapwood" "Seeker")
                (product-field$ "duramen" "Tokamak")

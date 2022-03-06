@@ -11,8 +11,10 @@
                   (string? y)
                   (boolean? y))
        y]
+    ; we should only have one lambda, for now
+    ; and we can always unparse it into defines for BSL
     [(lambda^ formals body)
-     `(define (func ,@formals) ,(unparse body))]
+     `(define (,(current-function-name) ,@formals) ,(unparse body))]
     [(app^ rator rand)
      `(,(unparse rator) ,@(map unparse rand))]
     [(cond^ clauses)

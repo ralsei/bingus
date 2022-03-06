@@ -59,17 +59,16 @@
     ;; TODO: this only works for unary recursion
     ;; (so like, sum-numbers)
     ;; the fix for this is to pass in the function signature and then do natural recursion
-    ;;
-    ;; also the function name is hardcoded, which is not great
     (match out
       [(recur$ on)
        (hash-set* cenv
                   (app^ accessor (list var-name)) on
                   ;; TODO: bad hardcode
-                  (app^ 'func (list (app^ accessor (list var-name)))) (number-atom$))]
+                  (app^ (current-function-name)
+                        (list (app^ accessor (list var-name)))) (number-atom$))]
       [_ (hash-set cenv (app^ accessor (list var-name)) out)])))
 
-(define (generate-sum-template name rsystem
+(define (generate-sum-template name
                                #:var-name var-name
                                #:cenv cenv
                                #:signature sig
@@ -98,7 +97,7 @@
                checks))]
       [_ (error 'generate-sum-template "currently unsupported: ~a" ty)]))
 
-  (match-define (sum$ cases) (hash-ref rsystem name))
+  (match-define (sum$ cases) (hash-ref (current-resolved-system) name))
   (cond^
    (map (λ (x)
           (generate-cond-clause (sum-case$-type x)))

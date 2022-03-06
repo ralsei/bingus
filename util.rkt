@@ -2,12 +2,14 @@
 (require racket/provide-syntax
          (for-syntax syntax/parse))
 (provide TODO
-         (struct-out fail)
          pascal->kebab
-         structs-out)
+         structs-out
+
+         current-resolved-system
+         current-function-name
+         current-function-type)
 
 (define (TODO) (error "unimplemented"))
-(struct fail () #:transparent)
 
 (define (pascal->kebab str)
   (string-downcase
@@ -19,3 +21,7 @@
      #'(combine-out
         (struct-out struct)
         ...)]))
+
+(define current-resolved-system (make-parameter (hash)))
+(define current-function-name (make-parameter 'func))
+(define current-function-type (make-parameter #f))

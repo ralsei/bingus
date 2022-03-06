@@ -36,39 +36,40 @@
 ;;
 ;; (this is probably what the Myth paper means by η-long form,
 ;;  since we always do this)
-(define (refine/introduce-lambda rsystem)
-  (define (introduce-lambda partial-prog)
-    (match-define (zipper (hole^ _ cenv (function$ ins out) checks) _)
-      partial-prog)
+(define refine/introduce-lambda
+  (let ()
+    (define (introduce-lambda partial-prog)
+      (match-define (zipper (hole^ _ cenv (function$ ins out) checks) _)
+        partial-prog)
 
-    (define args (map (thunk* (gensym)) ins))
+      (define args (map (thunk* (gensym)) ins))
 
-    (define with-binders
-      (hash-union (for/hash ([arg (in-list args)]
-                             [ty (in-list ins)])
-                    (values arg ty))
-                  cenv))
+      (define with-binders
+        (hash-union (for/hash ([arg (in-list args)]
+                               [ty (in-list ins)])
+                      (values arg ty))
+                    cenv))
 
-    (define with-struct-accessors
-      (apply hash-union with-binders
-             (for/list ([arg (in-list args)]
-                        [ty (in-list ins)]
-                        #:do [(define decl
-                                (and (string? ty)
-                                     (hash-ref rsystem ty)))]
-                        #:when (product$? decl))
-               (generate-product-environment ty rsystem arg))))
+      (define with-struct-accessors
+        (apply hash-union with-binders
+               (for/list ([arg (in-list args)]
+                          [ty (in-list ins)]
+                          #:do [(define decl
+                                  (and (string? ty)
+                                       (hash-ref (current-resolved-system) ty)))]
+                          #:when (product$? decl))
+                 (generate-product-environment ty arg))))
 
-    (first-hole/ast
-     (plug/ast (lambda^ args (hole^ #t with-struct-accessors out checks))
-               partial-prog)))
+      (first-hole/ast
+       (plug/ast (lambda^ args (hole^ #t with-struct-accessors out checks))
+                 partial-prog)))
 
-  (define (can-introduce-lambda? partial-prog)
-    (match partial-prog
-      [(zipper (hole^ _ _ (function$ _ _) _) _) #t]
-      [_ #f]))
+    (define (can-introduce-lambda? partial-prog)
+      (match partial-prog
+        [(zipper (hole^ _ _ (function$ _ _) _) _) #t]
+        [_ #f]))
 
-  (program-refinement introduce-lambda can-introduce-lambda?))
+    (program-refinement introduce-lambda can-introduce-lambda?)))
 
 (define (refine/guess-var v)
   (define (guess-var partial-prog)
@@ -118,13 +119,13 @@
 
   (program-refinement guess-app can-guess-app?))
 
-(define (refine/guess-template sum rsystem var-name)
+(define (refine/guess-template sum var-name)
   (define (guess-template partial-prog)
     (match-define (zipper (hole^ _ cenv sig checks) _)
       partial-prog)
 
     (first-hole/ast
-     (plug/ast (generate-sum-template sum rsystem
+     (plug/ast (generate-sum-template sum
                                       #:var-name var-name
                                       #:cenv cenv
                                       #:signature sig
@@ -138,7 +139,9 @@
     (and (hole^? focus)
          ; products are handled by introduce-lambda,
          ; where they're added to the environment as variables
-         (sum$? (hash-ref rsystem (hash-ref (hole^-cenv focus) var-name) #f))))
+         (sum$? (hash-ref (current-resolved-system)
+                          (hash-ref (hole^-cenv focus) var-name)
+                          #f))))
 
   (program-refinement guess-template can-guess-template?))
 
@@ -165,11 +168,11 @@
             consts)))
 
 ;; XXX: there should be some kind of weighting here
-(define (possible-refinements partial-prog rsystem)
+(define (possible-refinements partial-prog)
   (match-define (zipper (hole^ _ cenv _ checks) _) partial-prog)
 
   (define possible
-    (append (list (refine/introduce-lambda rsystem))
+    (append (list refine/introduce-lambda)
             (for/list ([(var ty) (in-hash cenv)]
                        #:when (not (function$? ty)))
               (refine/guess-var var))
@@ -179,46 +182,46 @@
                        #:when (function$? ty))
               (refine/guess-app var))
             (for/list ([(var ty) (in-hash cenv)])
-              (refine/guess-template ty rsystem var))))
+              (refine/guess-template ty var))))
 
   (for/list ([movement (in-list possible)]
              #:when (can-refine? movement partial-prog))
     movement))
 
-(define (run-synth init-ty system checks)
-  (define rsystem (resolve-system system))
+(define (run-synth function-name init-ty system checks)
+  (parameterize ([current-resolved-system (resolve-system system)]
+                 [current-function-name function-name]
+                 [current-function-type init-ty])
+    (define (do-bfs q)
+      (cond [(queue-empty? q) #f]
+            [else
+             (define-values (prog others) (dequeue q))
 
-  (define (do-bfs q n)
-    (cond #;[(100 . < . n) #f] ; (tentative) height limit, mostly for debugging
-          [(queue-empty? q) #f]
-          [else
-           (define-values (prog others) (dequeue q))
+             (match-define (zipper focus _) prog)
+             (pretty-write (unparse (rebuild prog)))
+             (cond [(not (hole^? focus))
+                    (define expr (rebuild prog))
+                    (cond [(satisfies? (unparse-system system)
+                                       (unparse expr)
+                                       checks)
+                           expr]
+                          [else (do-bfs others)])]
+                   [else
+                    (define next-layer
+                      (for/fold ([new-queue others])
+                                ([movement (in-list (possible-refinements prog))])
+                        (enqueue (movement prog) new-queue)))
+                    (cond [(empty? next-layer) (do-bfs others)]
+                          [else (do-bfs next-layer)])])]))
 
-           (match-define (zipper focus _) prog)
-           (pretty-write (unparse (rebuild prog)))
-           (cond [(not (hole^? focus))
-                  (define expr (rebuild prog))
-                  (cond [(satisfies? (unparse-system system)
-                                     (unparse expr)
-                                     checks)
-                         expr]
-                        [else (do-bfs others n)])]
-                 [else
-                  (define next-layer
-                    (for/fold ([new-queue others])
-                              ([movement (in-list (possible-refinements prog rsystem))])
-                      (enqueue (movement prog) new-queue)))
-                  (cond [(empty? next-layer) (do-bfs others n)]
-                        [else (do-bfs next-layer (add1 n))])])]))
-
-  (do-bfs (enqueue
-           (zip (hole^ #f
-                       (hash-union init-bsl-environment
-                                   (system->environment system))
-                       init-ty
-                       checks))
-           empty-queue)
-          0))
+    (unparse
+     (do-bfs (enqueue
+              (zip (hole^ #f
+                          (hash-union init-bsl-environment
+                                      (system->environment system))
+                          init-ty
+                          checks))
+              empty-queue)))))
 
 ;;; various tests
 (module+ test
@@ -260,17 +263,16 @@
                                          (product-field$ "first" (number-atom$))
                                          (product-field$ "rest" "BunchOfNumbers")))))))))
 
-  (pretty-print
-   (unparse
-    (run-synth
-     (function$ (list "BunchOfNumbers") (number-atom$))
-     bon-system
-     (list
-      (check^ '(func (make-none)) 1)
-      (check^ '(func (make-some 1 (make-some 2 (make-some 3 (make-none)))))
-              6)
-      (check^ '(func (make-some 5 (make-some 7 (make-some 1 (make-none)))))
-              35)))))
+  (pretty-write
+   (run-synth
+    'product #|:|# (function$ (list "BunchOfNumbers") (number-atom$))
+    bon-system
+    (list
+     (check^ '(product (make-none)) 1)
+     (check^ '(product (make-some 1 (make-some 2 (make-some 3 (make-none)))))
+             6)
+     (check^ '(product (make-some 5 (make-some 7 (make-some 1 (make-none)))))
+             35))))
 
   (define tl-system
     (list

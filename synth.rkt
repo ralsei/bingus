@@ -189,28 +189,27 @@
   (define rsystem (resolve-system system))
 
   (define (do-bfs q n)
-    (cond [(10 . < . n) #f] ; (tentative) height limit, mostly for debugging
+    (cond #;[(100 . < . n) #f] ; (tentative) height limit, mostly for debugging
           [(queue-empty? q) #f]
           [else
            (define-values (prog others) (dequeue q))
 
            (match-define (zipper focus _) prog)
-           (writeln (unparse (rebuild prog)))
+           (pretty-write (unparse (rebuild prog)))
            (cond [(not (hole^? focus))
                   (define expr (rebuild prog))
                   (cond [(satisfies? (unparse-system system)
                                      (unparse expr)
                                      checks)
                          expr]
-                        [else (do-bfs others (add1 n))])]
+                        [else (do-bfs others n)])]
                  [else
                   (define next-layer
                     (for/fold ([new-queue others])
                               ([movement (in-list (possible-refinements prog rsystem))])
                       (enqueue (movement prog) new-queue)))
-                  (do-bfs (cond [(empty? next-layer) others]
-                                [else next-layer])
-                          (add1 n))])]))
+                  (cond [(empty? next-layer) (do-bfs others n)]
+                        [else (do-bfs next-layer (add1 n))])])]))
 
   (do-bfs (enqueue
            (zip (hole^ #f
@@ -261,15 +260,17 @@
                                          (product-field$ "first" (number-atom$))
                                          (product-field$ "rest" "BunchOfNumbers")))))))))
 
-  #;(pretty-print
+  (pretty-print
    (unparse
     (run-synth
-     (function$ (list "BunchOfNumbers") "Number")
+     (function$ (list "BunchOfNumbers") (number-atom$))
      bon-system
      (list
       (check^ '(func (make-none)) 1)
       (check^ '(func (make-some 1 (make-some 2 (make-some 3 (make-none)))))
-              6)))))
+              6)
+      (check^ '(func (make-some 5 (make-some 7 (make-some 1 (make-none)))))
+              35)))))
 
   (define tl-system
     (list

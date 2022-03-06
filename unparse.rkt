@@ -20,10 +20,10 @@
     [(cond-case^ question answer)
      `(,(unparse question) ,(unparse answer))]
     [(hole^ can-fill-const? cenv sig checks)
-     `(DEBUG-HOLE ,can-fill-const?
-                  ,cenv
-                  ,sig
-                  ,checks)]
+     `(DEBUG-HOLE #;,can-fill-const?
+                  #;,cenv
+                  #;,sig
+                  #;,checks)]
     [_ (error 'unparse "unsupported form: ~a" exp)]))
 
 ;; insert define-structs if there are some
@@ -35,9 +35,18 @@
 
 (define (unparse-system sys)
   `(begin
-     ,@(for/list ([decl (in-list sys)]
-                  #:when (product$? decl))
-         (unparse-struct decl))))
+     ,@(let loop ([current-sigs (map defn$-type sys)]
+                  [defstructs '()])
+         (cond [(empty? current-sigs) defstructs]
+               [(product$? (first current-sigs))
+                (loop (rest current-sigs)
+                      (cons (unparse-struct (first current-sigs))
+                            defstructs))]
+               [(sum$? (first current-sigs))
+                (loop (rest current-sigs)
+                      (append defstructs
+                              (loop (map sum-case$-type (sum$-cases (first current-sigs)))
+                                    '())))]))))
 
 (module+ test
   (require rackunit)
@@ -61,4 +70,19 @@
                (product-field$ "sapwood" "Seeker")
                (product-field$ "duramen" "Tokamak")
                (product-field$ "stump" "Topspin"))))
-   '(define-struct fishtail-palm (sapwood duramen stump))))
+   '(define-struct fishtail-palm (sapwood duramen stump)))
+
+  (define bon-system
+    (list
+     (defn$ "BunchOfNumbers"
+       (sum$ (list (sum-case$ (product$ "none" '()))
+                   (sum-case$ (product$ "some"
+                                        (list
+                                         (product-field$ "first" (number-atom$))
+                                         (product-field$ "rest" "BunchOfNumbers")))))))))
+
+  (check-equal?
+   (unparse-system bon-system)
+   '(begin
+      (define-struct some (first rest))
+      (define-struct none ()))))

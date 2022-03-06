@@ -65,7 +65,8 @@
       [(recur$ on)
        (hash-set* cenv
                   (app^ accessor (list var-name)) on
-                  (app^ 'func (app^ accessor (list var-name))) on)]
+                  ;; TODO: bad hardcode
+                  (app^ 'func (list (app^ accessor (list var-name)))) (number-atom$))]
       [_ (hash-set cenv (app^ accessor (list var-name)) out)])))
 
 (define (generate-sum-template name rsystem
@@ -90,7 +91,8 @@
        (cond-case^
         (app^ (string->symbol (string-append name "?")) (list var-name))
         (hole^ #t
-               (hash-union cenv (generate-product-environment ty var-name))
+               (hash-union cenv (generate-product-environment ty var-name)
+                           #:combine (λ (x y) x))
                sig
                ;; TODO: narrow checks here
                checks))]

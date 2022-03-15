@@ -154,24 +154,24 @@
 (define (extract-constants checks)
   (define (extract-from-quoted exp)
     (match exp
-      ['() '()]
+      ['() (set)]
       [(cons x ys)
        #:when (or (number? x)
                   (string? x)
                   (boolean? x))
-       (cons x (extract-from-quoted ys))]
+       (set-add (extract-from-quoted ys) x)]
       [(cons xs ys)
        #:when (list? xs)
-       (append (extract-from-quoted xs)
-               (extract-from-quoted ys))]
+       (set-union (extract-from-quoted xs)
+                  (extract-from-quoted ys))]
       [(cons _ ys) (extract-from-quoted ys)]
-      [_ (list exp)]))
+      [_ (set exp)]))
 
-  (for/fold ([consts '()])
+  (for/fold ([consts (set)])
             ([check (in-list checks)])
-    (append (extract-from-quoted (check^-actual check))
-            (extract-from-quoted (check^-expected check))
-            consts)))
+    (set-union consts
+               (extract-from-quoted (check^-actual check))
+               (extract-from-quoted (check^-expected check)))))
 
 ;; XXX: there should be some kind of weighting here
 (define (possible-refinements partial-prog)
@@ -182,7 +182,7 @@
             (for/list ([(var ty) (in-hash cenv)]
                        #:when (not (function$? ty)))
               (refine/guess-var var))
-            (for/list ([atom (in-list (extract-constants checks))])
+            (for/list ([atom (in-set (extract-constants checks))])
               (refine/guess-const atom))
             (for/list ([(var ty) (in-hash cenv)]
                        #:when (function$? ty))
@@ -280,7 +280,7 @@
      (check^ '(product (make-some 5 (make-some 7 (make-some 1 (make-none)))))
              35))))
 
-  #;(pretty-write
+  (pretty-write
    (run-synth
     'length (function$ (list "BunchOfNumbers") (number-atom$))
     bon-system
@@ -294,7 +294,7 @@
      (check^ '(length (make-some 1 (make-some 2 (make-some 3 (make-some 6 (make-some 9 (make-none)))))))
              5))))
 
-  (pretty-write
+  #;(pretty-write
    (run-synth
     'singleton (function$ (list (number-atom$)) "BunchOfNumbers")
     bon-system

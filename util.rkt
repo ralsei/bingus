@@ -4,6 +4,7 @@
 (provide TODO
          pascal->kebab
          structs-out
+         set-add*
 
          current-resolved-system
          current-function-name
@@ -21,6 +22,11 @@
      #'(combine-out
         (struct-out struct)
         ...)]))
+
+(define (set-add* st . vs)
+  (for/fold ([curr-set st])
+            ([v (in-list vs)])
+    (set-add curr-set v)))
 
 (define current-resolved-system (make-parameter (hash)))
 (define current-function-name (make-parameter 'func))

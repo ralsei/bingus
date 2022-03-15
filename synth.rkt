@@ -58,7 +58,10 @@
                                   (and (string? ty)
                                        (hash-ref (current-resolved-system) ty)))]
                           #:when (product$? decl))
-                 (generate-product-environment ty arg))))
+                 (generate-product-environment ty
+                                               #:var-name arg
+                                               #:cenv cenv
+                                               #:checks checks))))
 
       (first-hole/ast
        (plug/ast (lambda^ args (hole^ #t with-struct-accessors out checks))
@@ -105,8 +108,10 @@
     (match-define (function$ ins _) (hash-ref cenv fn))
 
     (define args
-      (cons (hole^ #f cenv (first ins) checks)
-            (map (λ (in) (hole^ #t cenv in checks)) (rest ins))))
+      (cond [(empty? ins) '()]
+            [else
+             (cons (hole^ #f cenv (first ins) checks)
+                   (map (λ (in) (hole^ #t cenv in checks)) (rest ins)))]))
 
     (first-hole/ast (plug/ast (app^ fn args) partial-prog)))
 
@@ -137,6 +142,7 @@
     ; that works
     (match-define (zipper focus _) partial-prog)
     (and (hole^? focus)
+         (not (app^? var-name))
          ; products are handled by introduce-lambda,
          ; where they're added to the environment as variables
          (sum$? (hash-ref (current-resolved-system)
@@ -263,7 +269,7 @@
                                          (product-field$ "first" (number-atom$))
                                          (product-field$ "rest" "BunchOfNumbers")))))))))
 
-  (pretty-write
+  #;(pretty-write
    (run-synth
     'product #|:|# (function$ (list "BunchOfNumbers") (number-atom$))
     bon-system
@@ -273,6 +279,47 @@
              6)
      (check^ '(product (make-some 5 (make-some 7 (make-some 1 (make-none)))))
              35))))
+
+  #;(pretty-write
+   (run-synth
+    'length (function$ (list "BunchOfNumbers") (number-atom$))
+    bon-system
+    (list
+     (check^ '(length (make-none)) 0)
+     (check^ '(length (make-some 1 (make-none))) 1)
+     (check^ '(length (make-some 1 (make-some 2 (make-some 3 (make-none)))))
+             3)
+     (check^ '(length (make-some 1 (make-some 2 (make-none))))
+             2)
+     (check^ '(length (make-some 1 (make-some 2 (make-some 3 (make-some 6 (make-some 9 (make-none)))))))
+             5))))
+
+  (pretty-write
+   (run-synth
+    'singleton (function$ (list (number-atom$)) "BunchOfNumbers")
+    bon-system
+    (list
+     (check^ '(singleton 3) '(make-some 3 (make-none)))
+     (check^ '(singleton 5) '(make-some 5 (make-none))))))
+
+  (define nesting-doll-system
+    (list
+     (defn$ "NestingDoll"
+       (sum$ (list (sum-case$ (product$ "smallest-doll" 
+                                        (list (product-field$ "color" (string-atom$)))))
+                   (sum-case$ (product$ "larger-doll"
+                                        (list
+                                         (product-field$ "smaller" "NestingDoll")))))))))
+
+  #;(pretty-write
+   (run-synth
+    'extract #|:|# (function$ (list "NestingDoll") (string-atom$))
+    nesting-doll-system
+    (list
+     (check^ '(extract (make-smallest-doll "green")) "green")
+     (check^ '(extract (make-smallest-doll "red")) "red")
+     (check^ '(extract (make-larger-doll (make-larger-doll (make-smallest-doll "blue")))) "blue")
+     (check^ '(extract (make-larger-doll (make-smallest-doll "yellow"))) "yellow"))))
 
   (define tl-system
     (list

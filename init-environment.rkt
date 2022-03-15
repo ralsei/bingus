@@ -10,5 +10,6 @@
    'or (function$ (list (boolean-atom$) (boolean-atom$)) (boolean-atom$))
    '< (function$ (list (number-atom$) (number-atom$)) (boolean-atom$))
    '<= (function$ (list (number-atom$) (number-atom$)) (boolean-atom$))
-   '* (function$ (list (number-atom$) (number-atom$)) (number-atom$))
+   ;'* (function$ (list (number-atom$) (number-atom$)) (number-atom$))
+   'add1 (function$ (list (number-atom$)) (number-atom$))
    ))

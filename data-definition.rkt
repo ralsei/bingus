@@ -47,7 +47,10 @@
 
 ;; turn each product field into an entry in the environment,
 ;; UNLESS it's recursive, in which case insert recursion here
-(define (generate-product-environment ty var-name)
+(define (generate-product-environment ty
+                                      #:var-name var-name
+                                      #:cenv orig-cenv
+                                      #:checks checks)
   (match-define (product$ struct-name fields) ty)
 
   (for/fold ([cenv (hash)])
@@ -56,16 +59,21 @@
     (define accessor
       (format-symbol "~a-~a" struct-name accessor-name))
 
-    ;; TODO: this only works for unary recursion
-    ;; (so like, sum-numbers)
-    ;; the fix for this is to pass in the function signature and then do natural recursion
+    ;; TODO: this will decrease the size of all recursive arguments, not just one
+    ;;       I'm not sure if we should bother with not doing that
     (match out
       [(recur$ on)
+       (match-define (function$ ins out^) (current-function-type))
+       ;; everything's a hole, except our recursion, which is structurally decreasing
+       (define recursion-args
+         (for/list ([in (in-list ins)])
+           (cond [(equal? in on) (app^ accessor (list var-name))]
+                 [else (hole^ #t orig-cenv in checks)])))
+
        (hash-set* cenv
                   (app^ accessor (list var-name)) on
-                  ;; TODO: bad hardcode
                   (app^ (current-function-name)
-                        (list (app^ accessor (list var-name)))) (number-atom$))]
+                        recursion-args) out^)]
       [_ (hash-set cenv (app^ accessor (list var-name)) out)])))
 
 (define (generate-sum-template name
@@ -90,7 +98,10 @@
        (cond-case^
         (app^ (string->symbol (string-append name "?")) (list var-name))
         (hole^ #t
-               (hash-union cenv (generate-product-environment ty var-name)
+               (hash-union cenv (generate-product-environment ty
+                                                              #:var-name var-name
+                                                              #:cenv cenv
+                                                              #:checks checks)
                            #:combine (λ (x y) x))
                sig
                ;; TODO: narrow checks here
@@ -106,17 +117,21 @@
 ;; turns a system into an environment, by putting product accessors in scope
 ;; TODO: this has to be recursive now, b/c unions
 (define (system->environment system)
-  (for/fold ([env (hash)])
-            ([defn (in-list system)]
-             #:when (product$? (defn$-type defn)))
-    (match-define (product$ struct-name fields) (defn$-type defn))
+  (define (get-constructors name sig)
+    (match sig
+      [(sum$ cases) (append-map (compose (curry get-constructors name)
+                                         sum-case$-type)
+                                cases)]
+      [(product$ name^ fields)
+       (list (format-symbol "make-~a" name^)
+             (function$ (map product-field$-type fields) name))]
+      [_ '()]))
 
-    (hash-set* env
-               (format-symbol "make-~a" struct-name)
-               (function$ (map product-field$-type fields) (defn$-name defn))
-     ;; commented out for now, as guessing something? isn't useful
-     #;(string->symbol (string-append struct-name "?"))
-     #;(function$ (list (anything$)) (boolean-atom$)))))
+  (for/fold ([env (hash)])
+            ([defn (in-list system)])
+    (apply hash-set* env
+           (get-constructors (defn$-name defn)
+                             (defn$-type defn)))))
 
 (module+ test
   (require rackunit)
@@ -160,17 +175,18 @@
     "Tokamak" (string-atom$)
     "Topspin" (string-atom$)))
 
-  (check-equal?
-   (generate-sum-template "Seeker" (resolve-system mad-lib-system)
-                          #:var-name 's
-                          #:cenv (hash)
-                          #:signature (number-atom$)
-                          #:checks '())
-   (cond^
-    (list
-     (cond-case^ (app^ 'string=? '(s "finder")) (hole^ #t '#hash() (number-atom$) '()))
-     (cond-case^ (app^ 'string=? '(s "gadabout")) (hole^ #t '#hash() (number-atom$) '()))
-     (cond-case^ (app^ 'string=? '(s "hunter")) (hole^ #t '#hash() (number-atom$) '())))))
+  (parameterize ([current-resolved-system (resolve-system mad-lib-system)])
+    (check-equal?
+     (generate-sum-template "Seeker"
+                            #:var-name 's
+                            #:cenv (hash)
+                            #:signature (number-atom$)
+                            #:checks '())
+     (cond^
+      (list
+       (cond-case^ (app^ 'string=? '(s "finder")) (hole^ #t '#hash() (number-atom$) '()))
+       (cond-case^ (app^ 'string=? '(s "gadabout")) (hole^ #t '#hash() (number-atom$) '()))
+       (cond-case^ (app^ 'string=? '(s "hunter")) (hole^ #t '#hash() (number-atom$) '()))))))
 
   (define bon-system
     (list
@@ -192,20 +208,23 @@
        (product$ "some" (list (product-field$ "first" (number-atom$))
                               (product-field$ "rest" (recur$ "BunchOfNumbers")))))))))
 
-  (check-equal?
-   (generate-sum-template "BunchOfNumbers" (resolve-system bon-system)
-                          #:var-name 'bon
-                          #:cenv (hash)
-                          #:signature (number-atom$)
-                          #:checks '())
-   (cond^
-    (list
-     (cond-case^ (app^ 'none? '(bon)) (hole^ #t '#hash() (number-atom$) '()))
-     (cond-case^ (app^ 'some? '(bon))
-                 (hole^
-                  #t
-                  (hash (app^ 'some-first '(bon)) (number-atom$)
-                        (app^ 'func (app^ 'some-rest '(bon))) "BunchOfNumbers"
-                        (app^ 'some-rest '(bon)) "BunchOfNumbers")
-                  (number-atom$)
-                  '()))))))
+  (parameterize ([current-resolved-system (resolve-system bon-system)]
+                 [current-function-name 'func]
+                 [current-function-type (function$ (list "BunchOfNumbers") (number-atom$))])
+    (check-equal?
+     (generate-sum-template "BunchOfNumbers"
+                            #:var-name 'bon
+                            #:cenv (hash)
+                            #:signature (number-atom$)
+                            #:checks '())
+     (cond^
+      (list
+       (cond-case^ (app^ 'none? '(bon)) (hole^ #t '#hash() (number-atom$) '()))
+       (cond-case^ (app^ 'some? '(bon))
+                   (hole^
+                    #t
+                    (hash (app^ 'some-first '(bon)) (number-atom$)
+                          (app^ 'func (list (app^ 'some-rest '(bon)))) (number-atom$)
+                          (app^ 'some-rest '(bon)) "BunchOfNumbers")
+                    (number-atom$)
+                    '())))))))

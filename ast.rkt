@@ -125,7 +125,9 @@
   (match-define (zipper focus _) exp)
   (cond [(hole^? focus) exp]
         [(lambda^? focus) (first/ast (down/lambda^-body exp))]
-        [(list? focus) (first/ast (down/list-first exp))]
+        [(list? focus)
+         (cond [(empty? focus) exp]
+               [else (first/ast (down/list-first exp))])]
         [(app^? focus) (first/ast (down/app^-rand exp))]
         [(cond^? focus) (first/ast (down/cond^-clauses exp))]
         [(cond-case^? focus) (first/ast (down/cond-case^-answer exp))]
@@ -148,7 +150,9 @@
 
 (define (first-hole/ast exp)
   (match-define (and result (zipper focus _)) (first/ast exp))
-  (cond [(hole^? focus) result]
+  (cond [(equal? result exp) result]
+        [(zipper-at-top? result) result]
+        [(hole^? focus) result]
         [else (first-hole/ast (next/ast exp))]))
 
 (define (next-hole/ast exp)
@@ -161,6 +165,21 @@
 (define (plug/ast fill exp)
   (cond [(hole^? (zipper-focus exp)) (edit (const fill) exp)]
         [else (error 'plug/ast "not focused on a hole: ~a" exp)]))
+
+(define (complete? unzipped-exp)
+  (match unzipped-exp
+    [y #:when (or (symbol? y)
+                  (number? y)
+                  (string? y)
+                  (boolean? y))
+       #t]
+    [(lambda^ _ body) (complete? body)]
+    [(app^ _ rand) (complete? rand)]
+    [(cond^ clauses) (andmap complete? clauses)]
+    [(cond-case^ question answer) (and (complete? question)
+                                       (complete? answer))]
+    [(hole^ _ _ _ _) #f]
+    [_ (error 'complete? "unsupported form: ~a" unzipped-exp)]))
 
 ;;;; CHECKS
 ;; (check-expect (add1 5) 6)

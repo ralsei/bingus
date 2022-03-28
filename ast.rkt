@@ -30,6 +30,7 @@
  plug/ast
  first-hole/ast
  next-hole/ast
+ complete?
  ;;;; CHECKS
  (struct-out check^))
 
@@ -178,6 +179,7 @@
     [(cond^ clauses) (andmap complete? clauses)]
     [(cond-case^ question answer) (and (complete? question)
                                        (complete? answer))]
+    [(? list?) (andmap complete? unzipped-exp)]
     [(hole^ _ _ _ _) #f]
     [_ (error 'complete? "unsupported form: ~a" unzipped-exp)]))
 

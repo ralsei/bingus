@@ -58,7 +58,7 @@
                                   (and (string? ty)
                                        (hash-ref (current-resolved-system) ty)))]
                           #:when (product$? decl))
-                 (generate-product-environment ty
+                 (generate-product-environment decl
                                                #:var-name arg
                                                #:cenv cenv
                                                #:checks checks))))
@@ -76,7 +76,9 @@
 
 (define (refine/guess-var v)
   (define (guess-var partial-prog)
-    (next-hole/ast (plug/ast v partial-prog)))
+    ((cond [(complete? v) next-hole/ast]
+           [else first-hole/ast])
+     (plug/ast v partial-prog)))
 
   (define (can-guess-var? partial-prog)
     (match-define (zipper focus _) partial-prog)
@@ -244,21 +246,25 @@
                                         (list (product-field$ "first" "Point"))))
                    (sum-case$ (product$ "two"
                                         (list (product-field$ "first" "Point")
-                                              (product-field$ "second" "Point")))))))))
+                                              (product-field$ "second" "Point"))))
+                   (sum-case$ (product$ "three"
+                                        (list (product-field$ "first" "Point")
+                                              (product-field$ "second" "Point")
+                                              (product-field$ "third" "Point")))))))))
 
   #;(pretty-print
-     (unparse
-      (run-synth
-       (function$ (list "Point" "EvenMorePoints") "EvenMorePoints")
-       emp-system
-       (list
-        (check^ '(func (make-point 3 2) (make-none)) '(make-one (make-point 3 2)))
-        (check^ '(func (make-point 3 2) (make-one (make-point 4 5)))
-                '(make-two (make-point 4 5) (make-point 3 2)))
-        (check^ '(func (make-point 9 2) (make-two (make-point 9 3) (make-point 4 2)))
-                '(make-three (make-point 9 2) (make-point 9 3) (make-point 4 2)))
-        (check^ '(func (make-point 0 0) (make-three (make-point 9 2) (make-point 9 3) (make-point 4 2)))
-                '(make-three (make-point 0 0) (make-point 9 2) (make-point 9 3)))))))
+   (unparse
+    (run-synth
+     'add-point (function$ (list "Point" "EvenMorePoints") "EvenMorePoints")
+     emp-system
+     (list
+      (check^ '(add-point (make-point 3 2) (make-none)) '(make-one (make-point 3 2)))
+      (check^ '(add-point (make-point 3 2) (make-one (make-point 4 5)))
+              '(make-two (make-point 4 5) (make-point 3 2)))
+      (check^ '(add-point (make-point 9 2) (make-two (make-point 9 3) (make-point 4 2)))
+              '(make-three (make-point 9 2) (make-point 9 3) (make-point 4 2)))
+      (check^ '(add-point (make-point 0 0) (make-three (make-point 9 2) (make-point 9 3) (make-point 4 2)))
+              '(make-three (make-point 0 0) (make-point 9 2) (make-point 9 3)))))))
 
   (define bon-system
     (list
@@ -271,7 +277,7 @@
 
   #;(pretty-write
    (run-synth
-    'product #|:|# (function$ (list "BunchOfNumbers") (number-atom$))
+    'product (function$ (list "BunchOfNumbers") (number-atom$))
     bon-system
     (list
      (check^ '(product (make-none)) 1)
@@ -280,18 +286,18 @@
      (check^ '(product (make-some 5 (make-some 7 (make-some 1 (make-none)))))
              35))))
 
-  (pretty-write
+  #;(pretty-write
    (run-synth
-    'length (function$ (list "BunchOfNumbers") (number-atom$))
+    'length (function$ (list (number-atom$) "BunchOfNumbers") (number-atom$))
     bon-system
     (list
-     (check^ '(length (make-none)) 0)
-     (check^ '(length (make-some 1 (make-none))) 1)
-     (check^ '(length (make-some 1 (make-some 2 (make-some 3 (make-none)))))
+     (check^ '(length 3 (make-none)) 0)
+     (check^ '(length 1 (make-some 1 (make-none))) 1)
+     (check^ '(length 2 (make-some 1 (make-some 2 (make-some 3 (make-none)))))
              3)
-     (check^ '(length (make-some 1 (make-some 2 (make-none))))
+     (check^ '(length 3 (make-some 1 (make-some 2 (make-none))))
              2)
-     (check^ '(length (make-some 1 (make-some 2 (make-some 3 (make-some 6 (make-some 9 (make-none)))))))
+     (check^ '(length 9 (make-some 1 (make-some 2 (make-some 3 (make-some 6 (make-some 9 (make-none)))))))
              5))))
 
   #;(pretty-write
@@ -321,67 +327,14 @@
      (check^ '(extract (make-larger-doll (make-larger-doll (make-smallest-doll "blue")))) "blue")
      (check^ '(extract (make-larger-doll (make-smallest-doll "yellow"))) "yellow"))))
 
-  (define tl-system
+  (pretty-write
+   (run-synth
+    'change-color (function$ (list (string-atom$) "NestingDoll") "NestingDoll")
+    nesting-doll-system
     (list
-     (defn$ "TrafficLight"
-       (sum$ (list (sum-case$ (singleton-atom$ "red"))
-                   (sum-case$ (singleton-atom$ "yellow"))
-                   (sum-case$ (singleton-atom$ "green")))))))
-
-  #;(pretty-print
-   (unparse
-    (run-synth
-     ; TrafficLight -> String
-     (function$ (list "TrafficLight") (string-atom$))
-     tl-system
-     (list
-      (check^ '(func "red") "no don't")
-      (check^ '(func "yellow") "if you're brave")
-      (check^ '(func "green") "go ahead")))))
-
-  ;; this absolutely definitely does NOT work lmao
-  (define indiana-system
-    (list
-     (defn$ "Address"
-       (product$ "address"
-                 (list (product-field$ "street" (string-atom$))
-                       (product-field$ "apartment" (number-atom$))
-                       (product-field$ "city" (string-atom$))
-                       (product-field$ "zip" (number-atom$)))))))
-  #;(pretty-print
-     (unparse
-      (run-synth
-       ; Address -> Boolean
-       (function$ (list "Address") (boolean-atom$))
-       indiana-system
-       (list
-        (check^ '(func (make-address "700 N Woodlawn Ave"
-                                     2062
-                                     "Bloomington"
-                                     47408))
-                #true)
-        (check^ '(func (make-address "831 E 3rd St"
-                                     104
-                                     "Absolutely, Totally, Not Bloomington"
-                                     47405))
-                #true)
-        (check^ '(func (make-address "The Edge Of Indiana"
-                                     0
-                                     "Gary"
-                                     46000))
-                #true)
-        (check^ '(func (make-address "The Other Edge Of Indiana"
-                                     100
-                                     "Evansville"
-                                     47999))
-                #true)
-        (check^ '(func (make-address "333 East Scrimblo Lane"
-                                     2062
-                                     "Poggersdorf"
-                                     19482))
-                #false)
-        (check^ '(func (make-address "444 East Crumbus Ave"
-                                     0
-                                     "Fucking"
-                                     99999))
-                #false))))))
+     (check^ '(change-color "red" (make-smallest-doll "green"))
+             '(make-smallest-doll "red"))
+     (check^ '(change-color "yellow" (make-larger-doll (make-smallest-doll "red")))
+             '(make-larger-doll (make-smallest-doll "yellow")))
+     (check^ '(change-color "blue" (make-larger-doll (make-larger-doll (make-smallest-doll "yellow"))))
+             '(make-larger-doll (make-larger-doll (make-smallest-doll "blue"))))))))

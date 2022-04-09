@@ -10,7 +10,7 @@
          current-function-name
          current-function-type)
 
-(define (TODO) (error "unimplemented"))
+(define (TODO . _) (error "unimplemented"))
 
 (define (pascal->kebab str)
   (string-downcase

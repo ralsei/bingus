@@ -9,6 +9,7 @@
          "satisfies.rkt"
          "unparse.rkt"
          "util.rkt")
+(provide run-synth)
 
 ;;;; PARTIAL PROGRAMS
 ;; a partial program is a zipper of an AST.
@@ -196,7 +197,7 @@
              #:when (can-refine? movement partial-prog))
     movement))
 
-(define (run-synth function-name init-ty system checks)
+(define (run-synth function-name init-ty system checks #:debug? [debug? #f])
   (parameterize ([current-resolved-system (resolve-system system)]
                  [current-function-name function-name]
                  [current-function-type init-ty])
@@ -206,7 +207,8 @@
              (define-values (prog others) (dequeue q))
 
              (match-define (zipper focus _) prog)
-             (pretty-write (unparse (rebuild prog)))
+             (when debug?
+               (pretty-write (unparse (rebuild prog))))
              (cond [(not (hole^? focus))
                     (define expr (rebuild prog))
                     (cond [(satisfies? (unparse-system system)

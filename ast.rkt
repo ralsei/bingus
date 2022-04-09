@@ -81,7 +81,7 @@
 (struct defn$ (name type) #:transparent)
 
 ;; marks recursion in a resolved system
-;; TODO: mutual rcursion -- hence why the `on` field is here
+;; TODO: mutual recursion -- hence why the `on` field is here
 ;;       right now it's just set to the name of the type and is unused
 (struct recur$ (on) #:transparent)
 

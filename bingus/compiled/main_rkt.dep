@@ -1,0 +1,1 @@
+("8.4.0.7" ta6le ("4be11891f01243418fdbd9ded2b71c3ad7e46d4d" . "5db86477e85f4f67ab8bef29a2018382cd95de90") (collects #"bingus" #"parser" #"from-checkers" #"datadef.rkt") (collects #"bingus" #"parser" #"parse.rkt") (collects #"bingus" #"synth.rkt") (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt"))

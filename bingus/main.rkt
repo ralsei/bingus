@@ -2,6 +2,7 @@
 (require "parser/parse.rkt"
          "parser/from-checkers/datadef.rkt"
          "synth.rkt")
+(provide synthesize)
 
 (define (fresh-eval x) (eval x (make-base-namespace)))
 
@@ -16,10 +17,11 @@
    #:args (filename procname)
    (values filename (string->symbol procname))))
 
-;; Path Symbol -> Program
-(define (synthesize filename proc-to-synthesize)
-  (define lines (file->lines filename))
-  (define sexps (read-file-with-lang filename))
+;; Port Symbol -> Program
+(define (synthesize port proc-to-synthesize)
+  (define peek-port (peeking-input-port port))
+  (define lines (port->lines peek-port))
+  (define sexps (read-file-with-lang port))
 
   ; grab the datadefs
   (define system (checkers-dds->bingus-system
@@ -36,4 +38,4 @@
 
 (module+ main
   (define-values (filename procname) (parse-command-line-args))
-  (pretty-write (synthesize filename procname)))
+  (pretty-write (call-with-input-file filename (curryr synthesize procname))))

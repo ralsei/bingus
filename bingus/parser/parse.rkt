@@ -8,9 +8,9 @@
          checkers-dds->bingus-system
          checkers-polysigs->bingus-signature)
 
-(define (read-file-with-lang f)
+(define (read-file-with-lang prt)
   (match (parameterize ([read-accept-reader #t])
-           (call-with-input-file f read))
+           (read prt))
     [`(module ,_ ,_ (#%module-begin ,xs ...)) xs]))
 
 ;; assuming all checks take the form (check-expect (NAME INPUTS ...) OUTPUT)

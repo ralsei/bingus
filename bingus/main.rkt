@@ -22,6 +22,7 @@
   (define peek-port (peeking-input-port port))
   (define lines (port->lines peek-port))
   (define sexps (read-file-with-lang port))
+  (displayln sexps)
 
   ; grab the datadefs
   (define system (checkers-dds->bingus-system

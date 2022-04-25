@@ -8,10 +8,17 @@
          checkers-dds->bingus-system
          checkers-polysigs->bingus-signature)
 
+(define (read-until-eof prt)
+  (let loop ([r (read prt)])
+    (cond [(eof-object? r) '()]
+          [else (cons r (loop (read prt)))])))
+
 (define (read-file-with-lang prt)
   (match (parameterize ([read-accept-reader #t])
-           (read prt))
-    [`(module ,_ ,_ (#%module-begin ,xs ...)) xs]))
+           (read-until-eof prt))
+    [`(module ,_ ,_ (#%module-begin ,xs ...)) xs]
+    ;; not a module (read from defn window or sth)
+    [x x]))
 
 ;; assuming all checks take the form (check-expect (NAME INPUTS ...) OUTPUT)
 (define (parse-checks prog fn-name)

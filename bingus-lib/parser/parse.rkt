@@ -90,4 +90,5 @@
       s))
   ;; XXX: ...how does this process sum types?
   (function$ (map (compose checkers-pattern->bingus-pattern car) ins)
-             (checkers-pattern->bingus-pattern out)))
+             (checkers-pattern->bingus-pattern out)
+             #f))

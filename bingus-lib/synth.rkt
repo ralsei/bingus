@@ -40,7 +40,7 @@
 (define refine/introduce-lambda
   (let ()
     (define (introduce-lambda partial-prog)
-      (match-define (zipper (hole^ _ cenv (function$ ins out) checks) _)
+      (match-define (zipper (hole^ _ cenv (function$ ins out _) checks) _)
         partial-prog)
 
       (define args (map (thunk* (gensym)) ins))
@@ -70,7 +70,7 @@
 
     (define (can-introduce-lambda? partial-prog)
       (match partial-prog
-        [(zipper (hole^ _ _ (function$ _ _) _) _) #t]
+        [(zipper (hole^ _ _ (function$ _ _ _) _) _) #t]
         [_ #f]))
 
     (program-refinement introduce-lambda can-introduce-lambda?)))
@@ -108,10 +108,15 @@
   (define (guess-app partial-prog)
     (match-define (zipper (hole^ _ cenv sig checks) _)
       partial-prog)
-    (match-define (function$ ins _) (hash-ref cenv fn))
+    (match-define (function$ ins _ constructor?) (hash-ref cenv fn))
 
     (define args
-      (cond [(empty? ins) '()]
+      (cond ;; at least one argument should be a non-constant
+            ;; (ex. (+ 3 5) is useless)
+            ;; unless it's a constructor
+            [constructor?
+             (map (λ (in) (hole^ #t cenv in checks)) ins)]
+            ;; BSL doesn't allow nullary functions, so we don't need to check empty
             [else
              (cons (hole^ #f cenv (first ins) checks)
                    (map (λ (in) (hole^ #t cenv in checks)) (rest ins)))]))
@@ -232,111 +237,3 @@
                           init-ty
                           checks))
               empty-queue)))))
-
-;;; various tests
-(module+ test
-  (define emp-system
-    (list
-     (defn$ "Point"
-       (product$ "point"
-                 (list (product-field$ "x" (number-atom$))
-                       (product-field$ "y" (number-atom$)))))
-
-     (defn$ "EvenMorePoints"
-       (sum$ (list (sum-case$ (product$ "none" '()))
-                   (sum-case$ (product$ "one"
-                                        (list (product-field$ "first" "Point"))))
-                   (sum-case$ (product$ "two"
-                                        (list (product-field$ "first" "Point")
-                                              (product-field$ "second" "Point"))))
-                   (sum-case$ (product$ "three"
-                                        (list (product-field$ "first" "Point")
-                                              (product-field$ "second" "Point")
-                                              (product-field$ "third" "Point")))))))))
-
-  #;(pretty-print
-   (unparse
-    (run-synth
-     'add-point (function$ (list "Point" "EvenMorePoints") "EvenMorePoints")
-     emp-system
-     (list
-      (check^ '(add-point (make-point 3 2) (make-none)) '(make-one (make-point 3 2)))
-      (check^ '(add-point (make-point 3 2) (make-one (make-point 4 5)))
-              '(make-two (make-point 4 5) (make-point 3 2)))
-      (check^ '(add-point (make-point 9 2) (make-two (make-point 9 3) (make-point 4 2)))
-              '(make-three (make-point 9 2) (make-point 9 3) (make-point 4 2)))
-      (check^ '(add-point (make-point 0 0) (make-three (make-point 9 2) (make-point 9 3) (make-point 4 2)))
-              '(make-three (make-point 0 0) (make-point 9 2) (make-point 9 3)))))))
-
-  (define bon-system
-    (list
-     (defn$ "BunchOfNumbers"
-       (sum$ (list (sum-case$ (product$ "none" '()))
-                   (sum-case$ (product$ "some"
-                                        (list
-                                         (product-field$ "first" (number-atom$))
-                                         (product-field$ "rest" "BunchOfNumbers")))))))))
-
-  #;(pretty-write
-   (run-synth
-    'product (function$ (list "BunchOfNumbers") (number-atom$))
-    bon-system
-    (list
-     (check^ '(product (make-none)) 1)
-     (check^ '(product (make-some 1 (make-some 2 (make-some 3 (make-none)))))
-             6)
-     (check^ '(product (make-some 5 (make-some 7 (make-some 1 (make-none)))))
-             35))))
-
-  #;(pretty-write
-   (run-synth
-    'length (function$ (list (number-atom$) "BunchOfNumbers") (number-atom$))
-    bon-system
-    (list
-     (check^ '(length 3 (make-none)) 0)
-     (check^ '(length 1 (make-some 1 (make-none))) 1)
-     (check^ '(length 2 (make-some 1 (make-some 2 (make-some 3 (make-none)))))
-             3)
-     (check^ '(length 3 (make-some 1 (make-some 2 (make-none))))
-             2)
-     (check^ '(length 9 (make-some 1 (make-some 2 (make-some 3 (make-some 6 (make-some 9 (make-none)))))))
-             5))))
-
-  #;(pretty-write
-   (run-synth
-    'singleton (function$ (list (number-atom$)) "BunchOfNumbers")
-    bon-system
-    (list
-     (check^ '(singleton 3) '(make-some 3 (make-none)))
-     (check^ '(singleton 5) '(make-some 5 (make-none))))))
-
-  (define nesting-doll-system
-    (list
-     (defn$ "NestingDoll"
-       (sum$ (list (sum-case$ (product$ "smallest-doll" 
-                                        (list (product-field$ "color" (string-atom$)))))
-                   (sum-case$ (product$ "larger-doll"
-                                        (list
-                                         (product-field$ "smaller" "NestingDoll")))))))))
-
-  #;(pretty-write
-   (run-synth
-    'extract #|:|# (function$ (list "NestingDoll") (string-atom$))
-    nesting-doll-system
-    (list
-     (check^ '(extract (make-smallest-doll "green")) "green")
-     (check^ '(extract (make-smallest-doll "red")) "red")
-     (check^ '(extract (make-larger-doll (make-larger-doll (make-smallest-doll "blue")))) "blue")
-     (check^ '(extract (make-larger-doll (make-smallest-doll "yellow"))) "yellow"))))
-
-  (pretty-write
-   (run-synth
-    'change-color (function$ (list (string-atom$) "NestingDoll") "NestingDoll")
-    nesting-doll-system
-    (list
-     (check^ '(change-color "red" (make-smallest-doll "green"))
-             '(make-smallest-doll "red"))
-     (check^ '(change-color "yellow" (make-larger-doll (make-smallest-doll "red")))
-             '(make-larger-doll (make-smallest-doll "yellow")))
-     (check^ '(change-color "blue" (make-larger-doll (make-larger-doll (make-smallest-doll "yellow"))))
-             '(make-larger-doll (make-larger-doll (make-smallest-doll "blue"))))))))

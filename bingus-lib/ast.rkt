@@ -58,8 +58,8 @@
 ;; functions
 ;; Number String -> Number
 ;; =>
-;; (function$ (list (number-atom$) (string-atom$)) (number-atom$))
-(struct function$ (inputs output) #:transparent)
+;; (function$ (list (number-atom$) (string-atom$)) (number-atom$) #f)
+(struct function$ (inputs output constructor?) #:transparent)
 
 ;; structures/products
 (struct product$ (name fields) #:transparent)

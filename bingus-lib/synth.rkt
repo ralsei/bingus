@@ -43,7 +43,9 @@
       (match-define (zipper (hole^ _ cenv (function$ ins out _) checks) _)
         partial-prog)
 
-      (define args (map (thunk* (gensym)) ins))
+      (define args
+        (cond [(current-function-arguments) => identity]
+              [else (map (thunk* (gensym)) ins)]))
 
       (define with-binders
         (hash-union (for/hash ([arg (in-list args)]
@@ -132,10 +134,15 @@
 
   (program-refinement guess-app can-guess-app?))
 
+;; HACK: make this non-global after demos -- but boy does it make things fast
+(define SPLITS (mutable-set))
+
 (define (refine/guess-template sum var-name)
   (define (guess-template partial-prog)
     (match-define (zipper (hole^ _ cenv sig checks) _)
       partial-prog)
+
+    (set-add! SPLITS var-name)
 
     (first-hole/ast
      (plug/ast (generate-sum-template sum
@@ -151,6 +158,7 @@
     (match-define (zipper focus _) partial-prog)
     (and (hole^? focus)
          (not (app^? var-name))
+         (not (set-member? SPLITS var-name))
          ; products are handled by introduce-lambda,
          ; where they're added to the environment as variables
          (sum$? (hash-ref (current-resolved-system)
@@ -197,15 +205,20 @@
               (refine/guess-app var))
             (for/list ([(var ty) (in-hash cenv)])
               (refine/guess-template ty var))))
-
+  
   (for/list ([movement (in-list possible)]
              #:when (can-refine? movement partial-prog))
     movement))
 
-(define (run-synth function-name init-ty system checks #:debug? [debug? #f])
+(define (run-synth function-name init-ty system checks
+                   #:debug? [debug? #f]
+                   #:args [args #f])
+  (set-clear! SPLITS)
+
   (parameterize ([current-resolved-system (resolve-system system)]
                  [current-function-name function-name]
-                 [current-function-type init-ty])
+                 [current-function-type init-ty]
+                 [current-function-arguments args])
     (define (do-bfs q)
       (cond [(queue-empty? q) #f]
             [else

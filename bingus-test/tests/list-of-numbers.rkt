@@ -13,3 +13,13 @@
 (define (product xs)
   ...)
 
+;; add-ns : Number ListOfNumbers -> ListOfNumbers
+;; adds n to each element of the input list
+(check-expect (add-ns 3 empty) empty)
+(check-expect (add-ns 4 (list 1 2 3))
+              (list 5 6 7))
+(check-expect (add-ns 9 (list 3 27 2))
+              (list (+ 3 9) (+ 27 9) (+ 9 2)))
+
+(define (add-ns n xs)
+  ...)

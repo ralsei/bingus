@@ -25,20 +25,25 @@
 ;; NOTE: right now that's just the single type, since we don't
 ;;       synthesize helpers
 (define (resolve-system system)
-  (define ((insert-recursion name) sig)
+  (define (insert-recursion name sig)
     (match sig
       [(? string?) (cond [(equal? sig name) (recur$ sig)]
                          [else (resolve-defn sig)])]
-      [(product$ n fields) (product$ n (map (insert-recursion name) fields))]
-      [(product-field$ n type) (product-field$ n ((insert-recursion name) type))]
-      [(sum$ cases) (sum$ (map (insert-recursion name) cases))]
-      [(sum-case$ ty) (sum-case$ ((insert-recursion name) ty))]
+      [(product$ n fields) (product$ n
+                                     (for/list ([field (in-list fields)])
+                                       (insert-recursion name field)))]
+      [(product-field$ n type) (product-field$ n (insert-recursion name type))]
+      [(sum$ cases) (sum$ (for/list ([c (in-list cases)])
+                            (insert-recursion name c)))]
+      [(sum-case$ ty) (sum-case$ (insert-recursion name ty))]
+      [(cons$ a d) (cons$ (insert-recursion name a)
+                          (insert-recursion name d))]
       ;; TODO: look into this more. this is very wrong lol
       [y y]))
 
   (define (resolve-defn name)
     (let loop ([current-val name])
-      (cond [(not (string? current-val)) ((insert-recursion name) current-val)]
+      (cond [(not (string? current-val)) (insert-recursion name current-val)]
             [else (loop (system-ref name system))])))
 
   (for/hash ([decl (in-list system)])
@@ -76,6 +81,28 @@
                         recursion-args) out^)]
       [_ (hash-set cenv (app^ accessor (list var-name)) out)])))
 
+(define (generate-cons-environment ty
+                                   #:var-name var-name
+                                   #:cenv cenv
+                                   #:checks checks)
+  (match-define (cons$ a d) ty)
+
+  (match d
+    [(recur$ on)
+     (match-define (function$ ins out _) (current-function-type))
+     (define recursion-args
+       (for/list ([in (in-list ins)])
+         (cond [(equal? in on) (app^ 'rest (list var-name))]
+               [else (hole^ #t cenv in checks)])))
+     (hash-set* cenv
+                (app^ 'first (list var-name)) a
+                (app^ 'rest (list var-name)) on
+                (app^ (current-function-name)
+                      recursion-args) out)]
+    [_ (hash-set* cenv
+                  (app^ 'first (list var-name)) a
+                  (app^ 'rest (list var-name)) d)]))
+
 (define (generate-sum-template name
                                #:var-name var-name
                                #:cenv cenv
@@ -94,6 +121,18 @@
                            "invalid singleton value: ~a of signature ~a"
                            val ty)])
         (hole^ #t cenv sig checks))]
+      [(empty$)
+       (cond-case^ (app^ 'empty? (list var-name))
+                   (hole^ #t cenv sig checks))]
+      [(cons$ a d)
+       (cond-case^ (app^ 'cons? (list var-name))
+                   (hole^ #t
+                          (generate-cons-environment ty
+                                                     #:var-name var-name
+                                                     #:cenv cenv
+                                                     #:checks checks)
+                          sig
+                          checks))]
       [(product$ name _)
        (cond-case^
         (app^ (string->symbol (string-append name "?")) (list var-name))
@@ -125,6 +164,9 @@
       [(product$ name^ fields)
        (list (format-symbol "make-~a" name^)
              (function$ (map product-field$-type fields) name #t))]
+      [(cons$ a d)
+       (list 'cons
+             (function$ (list a d) name #t))]
       [_ '()]))
 
   (for/fold ([env (hash)])

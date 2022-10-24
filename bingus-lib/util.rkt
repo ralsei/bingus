@@ -8,7 +8,8 @@
 
          current-resolved-system
          current-function-name
-         current-function-type)
+         current-function-type
+         current-function-arguments)
 
 (define (TODO . _) (error "unimplemented"))
 
@@ -31,3 +32,4 @@
 (define current-resolved-system (make-parameter (hash)))
 (define current-function-name (make-parameter 'func))
 (define current-function-type (make-parameter #f))
+(define current-function-arguments (make-parameter #f))

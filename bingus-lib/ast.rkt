@@ -33,6 +33,7 @@
  first-hole/ast
  next-hole/ast
  complete?
+ function-signature-arity
  ;;;; CHECKS
  (struct-out check^))
 
@@ -60,6 +61,10 @@
 ;; =>
 ;; (function$ (list (number-atom$) (string-atom$)) (number-atom$) #f)
 (struct function$ (inputs output constructor?) #:transparent)
+
+;; compute the arity of the function
+(define (function-signature-arity fn)
+  (length (function$-inputs fn)))
 
 ;; structures/products
 (struct product$ (name fields) #:transparent)

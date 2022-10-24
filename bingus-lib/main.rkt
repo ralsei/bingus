@@ -18,7 +18,7 @@
    (values filename (string->symbol procname))))
 
 ;; Port Symbol -> Program
-(define (synthesize port proc-to-synthesize)
+(define (synthesize port proc-to-synthesize [args #f])
   (define peek-port (peeking-input-port port))
   (define lines (port->lines peek-port))
   (define sexps (read-file-with-lang port))
@@ -34,7 +34,9 @@
   ; and the checks
   (define checks (parse-checks sexps proc-to-synthesize))
   ; let 'er rip
-  (run-synth proc-to-synthesize sig system checks #:debug? (debug-mode)))
+  (run-synth proc-to-synthesize sig system checks
+             #:debug? (debug-mode)
+             #:args args))
 
 (module+ main
   (define-values (filename procname) (parse-command-line-args))

@@ -36,4 +36,5 @@
 
 (module+ test
   (check-synthesize "bunch-of-numbers" 'product)
-  (check-synthesize "nesting-doll" 'green-doll))
+  (check-synthesize "nesting-doll" 'green-doll)
+  (check-synthesize "list-of-numbers" 'product))

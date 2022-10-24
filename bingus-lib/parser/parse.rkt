@@ -51,6 +51,8 @@
     [(data-id 'string) (string-atom$)]
     [(data-id 'boolean) (boolean-atom$)]
     [(data-id 'empty) (empty$)]
+    [(data-id 'true) (singleton-atom$ #t)]
+    [(data-id 'false) (singleton-atom$ #f)]
     [(data-id name) (~a name)]
     [(data-literal val) (singleton-atom$ val)]
     [(data-make 'cons `(,a ,d))

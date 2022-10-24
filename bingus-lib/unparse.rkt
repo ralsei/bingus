@@ -22,9 +22,9 @@
     [(cond-case^ question answer)
      `(,(unparse question) ,(unparse answer))]
     [(hole^ can-fill-const? cenv sig checks)
-     `(DEBUG-HOLE #;,can-fill-const?
+     `(DEBUG-HOLE ,can-fill-const?
                   #;,cenv
-                  #;,sig
+                  ,sig
                   #;,checks)]
     [_ (error 'unparse "unsupported form: ~a" exp)]))
 
@@ -48,7 +48,10 @@
                 (loop (rest current-sigs)
                       (append defstructs
                               (loop (map sum-case$-type (sum$-cases (first current-sigs)))
-                                    '())))]))))
+                                    '())))]
+               [else
+                (loop (rest current-sigs)
+                      defstructs)]))))
 
 (module+ test
   (require rackunit)

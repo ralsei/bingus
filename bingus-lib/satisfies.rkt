@@ -9,7 +9,9 @@
 ;; plus, the η-contraction phase (if there is one) will mean we can check before eta-contraction here
 ;; since racket supports it but BSL doesn't
 (define base-eval
-  (make-evaluator 'racket/base))
+  (let ([ev (make-evaluator 'racket/base)])
+    (ev '(require racket/list))
+    ev))
 
 (define (run-eval quoted)
   (call-in-sandbox-context

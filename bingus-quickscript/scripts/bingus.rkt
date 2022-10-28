@@ -18,10 +18,26 @@
   (λ (selection
       #:definitions defs)
     (define defs-port (open-input-string (send defs get-flattened-text)))
-    (define sel-expr (read (open-input-string selection)))
+    (define start-pos (send defs get-start-position))
+    (define end-pos (send defs get-forward-sexp start-pos))
+    (define synth-expr (read (open-input-string (send defs get-text start-pos end-pos))))
     
-    (define-values (fn args) (definition-name sel-expr))
+    (define-values (fn args) (definition-name synth-expr))
 
-    (pretty-format
-     (synthesize defs-port fn args)
-     #:mode 'write)))
+    (define fr (new frame% [label "Synthesizing..."]))
+    (void (new message%
+               [parent fr]
+               [label (format "Generating code for: ~a" fn)]))
+    (send fr center)
+    (send fr show #t)
+
+    (define res (synthesize defs-port fn args))
+
+    (send fr show #f)
+
+    (send defs begin-edit-sequence)
+    (send defs remove-sexp start-pos)
+    (send defs insert (pretty-format res #:mode 'write) start-pos)
+    (send defs end-edit-sequence)
+
+    #f))

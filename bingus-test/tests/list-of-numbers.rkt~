@@ -13,15 +13,6 @@
 (define (product xs)
   ...)
 
-;; len : ListOfNumbers -> Number
-;; computes the length of the input list
-(check-expect (len empty) 0)
-(check-expect (len (list 1)) 1)
-(check-expect (len (list 9 2 1)) 3)
-
-(define (len xs)
-  ...)
-
 ;; add-ns : Number ListOfNumbers -> ListOfNumbers
 ;; adds n to each element of the input list
 (check-expect (add-ns 3 empty) empty)

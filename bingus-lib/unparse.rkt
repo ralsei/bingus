@@ -22,11 +22,18 @@
     [(cond-case^ question answer)
      `(,(unparse question) ,(unparse answer))]
     [(hole^ can-fill-const? cenv sig checks)
-     `(DEBUG-HOLE ,can-fill-const?
-                  #;,cenv
-                  ,sig
-                  #;,checks)]
+     `(... : ,(unparse-signature sig))]
     [_ (error 'unparse "unsupported form: ~a" exp)]))
+
+; basically only for debugging
+(define (unparse-signature sig)
+  (match sig
+    [(number-atom$) 'Number]
+    [(string-atom$) 'String]
+    [(boolean-atom$) 'Boolean]
+    [(function$ ins out _)
+     `(,@(map unparse-signature ins) -> ,(unparse-signature out))]
+    [else (string->symbol sig)]))
 
 ;; insert define-structs if there are some
 (define (unparse-struct decl)

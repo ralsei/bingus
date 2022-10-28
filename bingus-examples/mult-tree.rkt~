@@ -18,19 +18,3 @@
 (check-expect (prod-tree (make-node (make-node (make-leaf 3) (make-leaf 9))
                                     (make-leaf 3)))
               81)
-
-; depth : TreeOfNumbers -> Number
-(check-expect (depth (make-leaf 3)) 0)
-(check-expect (depth (make-node (make-leaf 4) (make-leaf 4))) 1)
-(check-expect (depth (make-node (make-leaf 2)
-                                (make-node (make-leaf 4) (make-leaf 3))))
-              2)
-(check-expect (depth (make-node (make-node (make-leaf 4) (make-leaf 1))
-                                (make-leaf 3)))
-              2)
-(check-expect (depth (make-node (make-node (make-leaf 4) (make-leaf 1))
-                                (make-node (make-leaf 9) (make-leaf 2))))
-              2)
-
-(define (depth ton)
-  ...)

@@ -7,4 +7,6 @@
         '+ (function$ (list (number-atom$) (number-atom$)) (number-atom$) #f)
         '* (function$ (list (number-atom$) (number-atom$)) (number-atom$) #f)
         '- (function$ (list (number-atom$)) (number-atom$) #f)
+        'max (function$ (list (number-atom$) (number-atom$)) (number-atom$) #f)
+        'min (function$ (list (number-atom$) (number-atom$)) (number-atom$) #f)
         ))
